@@ -12,49 +12,58 @@ class FormatterService {
     }
 
     func format(selectedItems: [FileData], githubToken: String?) async -> String {
-        // Ported from repo2txt/js/utils.js -> formatRepoContents
-        var output = ""
-        var index = ""
+        class IndexNode {
+            var children: [String: IndexNode] = [:]
+        }
 
-        // 1. Build the text-based directory index
         let sortedItems = selectedItems.sorted { $0.name < $1.name }
-        var tree: [String: Any] = [:]
+        let root = IndexNode()
+
+        // 1. Build the tree, correctly distinguishing files from directories
         for item in sortedItems {
             let pathComponents = item.name.split(separator: "/")
-            var currentLevel: [String: Any] = tree
-            for i in 0..<pathComponents.count {
-                let component = String(pathComponents[i])
-                if i == pathComponents.count - 1 {
-                    currentLevel[component] = nil // Mark as file
-                } else {
-                    if currentLevel[component] == nil {
-                        currentLevel[component] = [String: Any]()
-                    }
-                    currentLevel = currentLevel[component] as! [String: Any]
+            var currentNode = root
+
+            // Create nodes for directory components
+            for i in 0..<(pathComponents.count - 1) {
+                let componentName = String(pathComponents[i])
+                if currentNode.children[componentName] == nil {
+                    currentNode.children[componentName] = IndexNode()
                 }
+                currentNode = currentNode.children[componentName]!
+            }
+
+            // Create a leaf node for the file component
+            if let filename = pathComponents.last {
+                currentNode.children[String(filename)] = IndexNode() // Files are nodes with no children
             }
         }
-        
-        func buildIndex(node: [String: Any], prefix: String = "") -> String {
+
+        // 2. Build the string index from the tree
+        func buildIndex(node: IndexNode, prefix: String = "") -> String {
             var result = ""
-            let entries = node.keys.sorted()
+            let entries = node.children.keys.sorted()
             for (i, key) in entries.enumerated() {
+                let childNode = node.children[key]!
                 let isLastItem = i == entries.count - 1
                 let linePrefix = isLastItem ? "└── " : "├── "
                 let childPrefix = isLastItem ? "    " : "│   "
-                
+
                 result += "\(prefix)\(linePrefix)\(key)\n"
-                if let subNode = node[key] as? [String: Any] {
-                    result += buildIndex(node: subNode, prefix: "\(prefix)\(childPrefix)")
+                
+                // Only recurse if the child node is a directory (i.e., has children)
+                if !childNode.children.isEmpty {
+                    result += buildIndex(node: childNode, prefix: "\(prefix)\(childPrefix)")
                 }
             }
             return result
         }
 
-        index = buildIndex(node: tree)
-        output += "Directory Structure:\n\n\(index)"
+        let index = buildIndex(node: root)
+        var output = "Directory Structure:\n\n\(index)"
 
-        // 2. Fetch and append file contents
+        // 3. Fetch and append file contents
+        var fileContentsText = ""
         await withTaskGroup(of: (String, String).self) {
             group in
             for item in sortedItems {
@@ -80,11 +89,12 @@ class FormatterService {
 
             for item in sortedItems {
                 if let content = fileContents[item.name] {
-                    output += "\n\n---\nFile: \(item.name)\n---\n\n\(content)\n"
+                    fileContentsText += "\n\n---\nFile: \(item.name)\n---\n\n\(content)\n"
                 }
             }
         }
 
+        output += fileContentsText
         return output
     }
 }

@@ -17,6 +17,21 @@ public struct ControlPanelView: View {
             List(mainViewModel.fileTree) { rootNode in
                 FileTreeView(node: rootNode)
             }
+
+            if !mainViewModel.fileTree.isEmpty {
+                Button(action: {
+                    mainViewModel.generateOutputText()
+                }) {
+                    HStack {
+                        Image(systemName: "text.alignleft")
+                        Text("Generate Text")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .padding()
+                .buttonStyle(.borderedProminent)
+            }
+
             HistoryView()
         }
     }

@@ -23,7 +23,7 @@ struct FileTreeView: View {
         // 我们不再需要 Toggle，因为 CheckboxToggleStyle 已经是一个 Button 了
         HStack {
             Image(systemName: node.data.isDirectory ? "folder" : "doc")
-            Text(node.data.name)
+            Text(URL(fileURLWithPath: node.data.name).lastPathComponent)
         }
         .modifier(CheckboxModifier(node: node))
     }

@@ -239,8 +239,7 @@ class MainViewModel: ObservableObject {
                 }
             }
 
-            let fileData = FileData(name: pathComponents.last!, url: file.url, isDirectory: false)
-            let fileNode = FileNode(data: fileData)
+            let fileNode = FileNode(data: file)
             let parentPath = pathComponents.dropLast().joined(separator: "/")
             nodeMap[parentPath]?.children.append(fileNode)
             fileNode.parent = nodeMap[parentPath]
