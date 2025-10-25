@@ -1,92 +1,68 @@
-
-//
-//  LocalFileService.swift
-//  Mosaic
-//
-//  Created by Gemini on 2025/10/25.
-//
-
+// File: /Mosaic/Services/LocalFileService.swift
 import Foundation
 
+// Using the simpler, more robust approach from the repo2txt web version.
+// This service now returns a flat list of file data and parsed gitignore rules.
 class LocalFileService {
-    func scanDirectory(at url: URL) async -> [FileItem] {
-        await Task.detached {
-            var items: [FileItem] = []
+
+    func scanDirectory(at url: URL) async -> (files: [FileData], gitignore: [String]) {
+        return await Task.detached(priority: .userInitiated) {
+            var files: [FileData] = []
+            var gitignoreRules: [String] = [".git/**"] // Start with a default rule
+
+            guard url.startAccessingSecurityScopedResource() else {
+                print("Failed to start accessing security-scoped resource.")
+                return ([], [])
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+
             let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey]
-            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: keys, options: .skipsHiddenFiles) else {
-                return []
+            guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+                return ([], gitignoreRules)
             }
 
-            var directoryMap: [URL: FileItem] = [:]
+            let allURLs = enumerator.allObjects as? [URL] ?? []
 
-            for fileURL in enumerator.allObjects.compactMap({ $0 as? URL }) {
-                guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)),
-                      let isDirectory = resourceValues.isDirectory,
-                      let name = resourceValues.name
-                else {
-                    continue
-                }
-
-                let item = FileItem(name: name, url: fileURL, children: isDirectory ? [] : nil)
-
-                if fileURL.hasDirectoryPath {
-                    directoryMap[fileURL] = item
-                }
-
-                let parentURL = fileURL.deletingLastPathComponent()
-                if var parentItem = directoryMap[parentURL] {
-                    parentItem.children?.append(item)
-                    directoryMap[parentURL] = parentItem // Re-assign to update the map
-                } else {
-                    if parentURL == url { // Direct child of the root
-                        items.append(item)
+            // First, find all .gitignore files and parse their rules
+            for fileURL in allURLs {
+                if fileURL.lastPathComponent == ".gitignore" {
+                    if let content = try? String(contentsOf: fileURL, encoding: .utf8) {
+                        let lines = content.split(whereSeparator: \.isNewline)
+                        let gitignorePath = fileURL.deletingLastPathComponent().path.replacingOccurrences(of: url.path, with: "").dropFirst()
+                        
+                        for line in lines {
+                            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+                            if !trimmedLine.isEmpty && !trimmedLine.hasPrefix("#") {
+                                if !gitignorePath.isEmpty {
+                                    gitignoreRules.append("\(gitignorePath)/\(trimmedLine)")
+                                } else {
+                                    gitignoreRules.append(String(trimmedLine))
+                                }
+                            }
+                        }
                     }
                 }
             }
-
-            // This is a simplified tree construction. For a more robust solution, a dictionary-based approach is better.
-            // The current implementation rebuilds the tree structure from a flat list, which is not optimal.
-            // A better way is to build a dictionary of URL -> FileItem and then connect the children.
-            // Let's try to fix this.
-
-            // Reset and use a better approach
-            items = []
-            directoryMap = [:]
-            var rootItems: [FileItem] = []
-
-            let fileManager = FileManager.default
-            guard let fullEnumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: keys, options: .skipsHiddenFiles) else {
-                return []
-            }
-
-            var allItems: [URL: FileItem] = [:]
-
-            for fileURL in fullEnumerator.allObjects.compactMap({ $0 as? URL }) {
+            
+            // Second, create the flat list of all files
+            for fileURL in allURLs {
                 guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)),
                       let isDirectory = resourceValues.isDirectory,
                       let name = resourceValues.name
-                else {
-                    continue
-                }
-                let newItem = FileItem(name: name, url: fileURL, children: isDirectory ? [] : nil)
-                allItems[fileURL] = newItem
-            }
+                else { continue }
+                
+                // The path should be relative to the root URL
+                let relativePath = fileURL.path.replacingOccurrences(of: url.path, with: "")
+                let cleanPath = relativePath.starts(with: "/") ? String(relativePath.dropFirst()) : relativePath
 
-            for (fileURL, item) in allItems {
-                let parentURL = fileURL.deletingLastPathComponent()
-                if let parentItem = allItems[parentURL] {
-                    // This is a child item
-                    var mutableParent = parentItem
-                    mutableParent.children?.append(item)
-                    allItems[parentURL] = mutableParent
-                } else {
-                    // This is a root item
-                    rootItems.append(item)
+                // We only care about files for the flat list, not directories
+                if !isDirectory {
+                    let data = FileData(name: cleanPath, url: fileURL, isDirectory: isDirectory)
+                    files.append(data)
                 }
             }
-
-            return rootItems
-
+            
+            return (files, gitignoreRules)
         }.value
     }
 

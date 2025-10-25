@@ -1,24 +1,32 @@
-
-//
-//  CheckboxToggleStyle.swift
-//  Mosaic
-//
-//  Created by Gemini on 2025/10/25.
-//
-
+// File: /Mosaic/Views/Shared/CheckboxToggleStyle.swift
 import SwiftUI
 
 struct CheckboxToggleStyle: ToggleStyle {
+    // 接收 FileNode
+    @ObservedObject var node: FileNode
+
     func makeBody(configuration: Configuration) -> some View {
-        HStack {
-            configuration.label
-            Spacer()
-            Image(systemName: configuration.isOn ? "checkmark.square" : "square")
-                .resizable()
-                .frame(width: 22, height: 22)
-                .onTapGesture {
-                    configuration.isOn.toggle()
-                }
+        Button(action: {
+            // 直接调用向下传播的命令
+            node.propagateSelection(selected: node.isSelected || node.isIndeterminate ? false : true)
+        }) {
+            HStack {
+                Image(systemName: imageName)
+                    .resizable()
+                    .frame(width: 16, height: 16)
+                configuration.label
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var imageName: String {
+        if node.isSelected {
+            return "checkmark.square.fill"
+        } else if node.isIndeterminate {
+            return "minus.square.fill"
+        } else {
+            return "square"
         }
     }
 }

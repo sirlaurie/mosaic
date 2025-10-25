@@ -1,4 +1,3 @@
-
 //
 //  MainViewModel.swift
 //  Mosaic
@@ -14,7 +13,7 @@ import Foundation
 class MainViewModel: ObservableObject {
     // MARK: - Published Properties
 
-    @Published var fileTree: [FileItem] = []
+    @Published var fileTree: [FileNode] = []
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
 
@@ -29,6 +28,7 @@ class MainViewModel: ObservableObject {
     private let gitHubAPIService: GitHubAPIService
     private let localFileService: LocalFileService
     private let historyService: HistoryService
+    private let formatterService: FormatterService
 
     // MARK: - Initialization
 
@@ -40,6 +40,7 @@ class MainViewModel: ObservableObject {
         self.gitHubAPIService = gitHubAPIService
         self.localFileService = localFileService
         self.historyService = historyService
+        formatterService = FormatterService(localFileService: localFileService, gitHubAPIService: gitHubAPIService)
     }
 
     // MARK: - Public Methods
@@ -62,21 +63,28 @@ class MainViewModel: ObservableObject {
     }
 
     func selectLocalDirectory() {
-        // This would typically use NSOpenPanel, which is a UI concern.
-        // For the view model, we'll assume the URL is passed in.
         guard !localPath.isEmpty, let url = URL(string: "file://\(localPath)") else { return }
 
         Task {
             isLoading = true
             errorMessage = nil
-            let tree = await localFileService.scanDirectory(at: url)
-            self.fileTree = tree
+            
+            // 1. Get the flat list of files and gitignore rules from the service
+            let (files, gitignoreRules) = await localFileService.scanDirectory(at: url)
+            
+            // 2. Filter the files using the gitignore rules
+            let filteredFiles = files.filter { !isIgnored(filePath: $0.name, gitignoreRules: gitignoreRules) }
+
+            // 3. Build the nested FileNode tree from the filtered flat list
+            self.fileTree = buildFileTree(from: filteredFiles)
+
             do {
                 try await historyService.addHistoryItem(path: url.path, type: .local)
                 NotificationCenter.default.post(name: .didUpdateHistory, object: nil)
             } catch {
                 self.errorMessage = error.localizedDescription
             }
+            
             isLoading = false
         }
     }
@@ -89,6 +97,7 @@ class MainViewModel: ObservableObject {
 
         if openPanel.runModal() == .OK {
             if let url = openPanel.url {
+                _ = url.startAccessingSecurityScopedResource()
                 localPath = url.path
                 selectLocalDirectory()
             }
@@ -110,13 +119,140 @@ class MainViewModel: ObservableObject {
     }
 
     func generateOutputText() {
-        // This will be implemented in a later stage, likely involving FormatterService
-        let selectedItems = collectSelectedItems(from: fileTree)
-        // For now, just list the selected file paths
-        outputText = selectedItems.map(\.url.path).joined(separator: "\n")
+        isLoading = true
+        errorMessage = nil
+
+        let selectedFiles = collectSelectedItems(from: fileTree)
+
+        Task {
+            let result = await formatterService.format(selectedItems: selectedFiles, githubToken: self.githubToken)
+
+            await MainActor.run {
+                self.outputText = result
+                self.isLoading = false
+            }
+        }
     }
 
     // MARK: - Private Helper Methods
+    
+        private func isIgnored(filePath: String, gitignoreRules: [String]) -> Bool {
+    
+            return gitignoreRules.contains(where: { rule in
+    
+                var pattern = rule.trimmingCharacters(in: .whitespaces)
+    
+                guard !pattern.isEmpty, !pattern.hasPrefix("#") else { return false }
+    
+    
+    
+                let isAnchored = pattern.hasPrefix("/")
+    
+                if isAnchored {
+    
+                    pattern = String(pattern.dropFirst())
+    
+                }
+    
+    
+    
+                let isDirectory = pattern.hasSuffix("/")
+    
+                if isDirectory {
+    
+                    pattern = String(pattern.dropLast())
+    
+                }
+    
+    
+    
+                // Convert glob to regex
+    
+                pattern = pattern
+    
+                    .replacingOccurrences(of: ".", with: "\\.")
+    
+                    .replacingOccurrences(of: "*", with: "[^/]*") // More correct glob-to-regex for *
+    
+                    .replacingOccurrences(of: "?", with: ".")
+    
+    
+    
+                if !isAnchored {
+    
+                    pattern = "(^|/)" + pattern
+    
+                } else {
+    
+                    pattern = "^" + pattern
+    
+                }
+    
+    
+    
+                if isDirectory {
+    
+                    pattern += "(/.*)?$"
+    
+                } else {
+    
+                    pattern += "$"
+    
+                }
+    
+    
+    
+                if let regex = try? NSRegularExpression(pattern: pattern) {
+    
+                    let range = NSRange(location: 0, length: filePath.utf16.count)
+    
+                    return regex.firstMatch(in: filePath, options: [], range: range) != nil
+    
+                }
+    
+                return false
+    
+            })
+    
+        }
+    
+    private func buildFileTree(from files: [FileData]) -> [FileNode] {
+        // Ported from the logic in repo2txt/js/utils.js displayDirectoryStructure
+        let root = FileNode(data: FileData(name: "", url: URL(fileURLWithPath: ""), isDirectory: true))
+        var nodeMap: [String: FileNode] = ["": root]
+
+        for file in files.sorted(by: { $0.name < $1.name }) {
+            let pathComponents = file.name.split(separator: "/").map(String.init)
+            var currentPath = ""
+
+            for i in 0..<(pathComponents.count - 1) {
+                let component = pathComponents[i]
+                let parentPath = currentPath
+                currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
+
+                if nodeMap[currentPath] == nil {
+                    let dirData = FileData(name: component, url: URL(fileURLWithPath: currentPath), isDirectory: true)
+                    let newNode = FileNode(data: dirData)
+                    nodeMap[currentPath] = newNode
+                    nodeMap[parentPath]?.children.append(newNode)
+                    newNode.parent = nodeMap[parentPath]
+                }
+            }
+
+            let fileData = FileData(name: pathComponents.last!, url: file.url, isDirectory: false)
+            let fileNode = FileNode(data: fileData)
+            let parentPath = pathComponents.dropLast().joined(separator: "/")
+            nodeMap[parentPath]?.children.append(fileNode)
+            fileNode.parent = nodeMap[parentPath]
+        }
+        
+        // Sort all children alphabetically
+        for (_, node) in nodeMap {
+            node.children.sort { $0.data.name < $1.data.name }
+        }
+
+        return root.children
+    }
 
     private func parseGitHubURL(_ urlString: String) throws -> (owner: String, repo: String) {
         guard let url = URL(string: urlString), url.host == "github.com" else {
@@ -129,14 +265,14 @@ class MainViewModel: ObservableObject {
         return (owner: pathComponents[0], repo: pathComponents[1])
     }
 
-    private func collectSelectedItems(from items: [FileItem]) -> [FileItem] {
-        var selected: [FileItem] = []
-        for item in items {
-            if item.isSelected {
-                selected.append(item)
+    private func collectSelectedItems(from nodes: [FileNode]) -> [FileData] {
+        var selected: [FileData] = []
+        for node in nodes {
+            if !node.data.isDirectory, node.isSelected {
+                selected.append(node.data)
             }
-            if let children = item.children {
-                selected.append(contentsOf: collectSelectedItems(from: children))
+            if node.children.isEmpty == false {
+                selected.append(contentsOf: collectSelectedItems(from: node.children))
             }
         }
         return selected

@@ -18,6 +18,7 @@ private struct GitHubTreeItem: Codable {
     let url: String
 }
 
+@MainActor
 class GitHubAPIService {
     private let session: URLSession
 
@@ -25,7 +26,7 @@ class GitHubAPIService {
         self.session = session
     }
 
-    func fetchRepositoryTree(owner: String, repo: String, branch: String = "main", token: String?) async throws -> [FileItem] {
+    func fetchRepositoryTree(owner: String, repo: String, branch: String = "main", token: String?) async throws -> [FileNode] {
         let urlString = "https://api.github.com/repos/\(owner)/\(repo)/git/trees/\(branch)?recursive=1"
         guard let url = URL(string: urlString) else {
             throw URLError(.badURL)
@@ -58,16 +59,17 @@ class GitHubAPIService {
         return content
     }
 
-    private func buildTree(from items: [GitHubTreeItem]) -> [FileItem] {
-        var nodeDict: [String: FileItem] = [:]
-        var rootItems: [FileItem] = []
+    private func buildTree(from items: [GitHubTreeItem]) -> [FileNode] {
+        var nodeDict: [String: FileNode] = [:]
+        var rootItems: [FileNode] = []
 
         // Create all nodes
         for item in items {
             guard let url = URL(string: item.url) else { continue }
             let isDirectory = item.type == "tree"
-            let newItem = FileItem(name: (item.path as NSString).lastPathComponent, url: url, children: isDirectory ? [] : nil)
-            nodeDict[item.path] = newItem
+            let data = FileData(name: (item.path as NSString).lastPathComponent, url: url, isDirectory: isDirectory)
+            let newNode = FileNode(data: data, children: isDirectory ? [] : [])
+            nodeDict[item.path] = newNode
         }
 
         // Link nodes
@@ -80,9 +82,9 @@ class GitHubAPIService {
                     rootItems.append(node)
                 }
             } else {
-                if var parentNode = nodeDict[parentPath], let childNode = nodeDict[path] {
-                    parentNode.children?.append(childNode)
-                    nodeDict[parentPath] = parentNode
+                if let parentNode = nodeDict[parentPath], let childNode = nodeDict[path] {
+                    childNode.parent = parentNode
+                    parentNode.children.append(childNode)
                 }
             }
         }
