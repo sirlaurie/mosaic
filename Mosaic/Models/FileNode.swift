@@ -26,7 +26,8 @@ class FileNode: Identifiable, ObservableObject, Hashable {
             parent?.updateSelectionFromChildren()
         }
     }
-    @Published var isIndeterminate: Bool {
+    @Published var isIndeterminate: Bool
+    @Published var isExpanded: Bool = true {
         didSet {
             // 当isIndeterminate改变时，确保isSelected为false
             if isIndeterminate { isSelected = false }

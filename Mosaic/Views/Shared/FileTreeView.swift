@@ -7,7 +7,7 @@ struct FileTreeView: View {
 
     var body: some View {
         if node.data.isDirectory {
-            DisclosureGroup(isExpanded: .constant(true)) {
+            DisclosureGroup(isExpanded: $node.isExpanded) {
                 ForEach(node.children) { childNode in
                     FileTreeView(node: childNode)
                 }
