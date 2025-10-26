@@ -48,7 +48,7 @@ class LocalFileService {
             for fileURL in allURLs {
                 guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)),
                       let isDirectory = resourceValues.isDirectory,
-                      let name = resourceValues.name
+                      let _ = resourceValues.name
                 else { continue }
                 
                 // The path should be relative to the root URL

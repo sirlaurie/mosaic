@@ -13,12 +13,25 @@ public struct ControlPanelView: View {
 
     public var body: some View {
         VStack {
-            InputView()
-            List(mainViewModel.fileTree) { rootNode in
-                FileTreeView(node: rootNode)
-            }
+            if mainViewModel.fileTree.isEmpty {
+                InputView()
+                HistoryView()
+            } else {
+                HStack {
+                    Text("Selected Files")
+                        .font(.headline)
+                    Spacer()
+                    Button("Clear") {
+                        mainViewModel.fileTree = []
+                        mainViewModel.outputText = ""
+                    }
+                }
+                .padding([.horizontal, .top])
 
-            if !mainViewModel.fileTree.isEmpty {
+                List(mainViewModel.fileTree) { rootNode in
+                    FileTreeView(node: rootNode)
+                }
+
                 Button(action: {
                     mainViewModel.generateOutputText()
                 }) {
@@ -31,8 +44,6 @@ public struct ControlPanelView: View {
                 .padding()
                 .buttonStyle(.borderedProminent)
             }
-
-            HistoryView()
         }
     }
 }
