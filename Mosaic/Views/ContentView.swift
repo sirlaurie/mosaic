@@ -20,14 +20,18 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .top)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    CustomInputView()
-                        .frame(height: 80, alignment: .top)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if mainViewModel.fileTree.isEmpty {
+                        CustomInputView()
+                            .frame(height: 80, alignment: .top)
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
 
                     if !mainViewModel.fileTree.isEmpty {
                         FileTreeContainerView()
                             .frame(maxHeight: .infinity)
+                            .transition(.move(edge: .top).combined(with: .opacity))
                     } else if mainViewModel.currentTabType == .local {
                         CustomHistoryView()
                             .frame(maxHeight: .infinity)
