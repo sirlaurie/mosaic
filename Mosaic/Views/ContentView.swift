@@ -12,14 +12,18 @@ struct ContentView: View {
     @EnvironmentObject var historyViewModel: HistoryViewModel
     @State private var showCopySuccess = false
     @State private var previousFileTreeState = true // Track previous isEmpty state
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
                 VStack(spacing: 0) {
                     CustomTabView()
                         .frame(height: 56, alignment: .top)
                         .frame(maxWidth: .infinity, alignment: .top)
                         .fixedSize(horizontal: false, vertical: true)
+                        .onAppear {
+                            print("🏷️  CustomTabView appeared")
+                        }
 
                     if mainViewModel.fileTree.isEmpty {
                         CustomInputView()
@@ -59,13 +63,21 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .fixedSize(horizontal: false, vertical: false)
+                .animation(nil)
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+                .onAppear {
+                    print("📦 Sidebar VStack appeared")
+                }
 
             } detail: {
                 VStack(spacing: 0) {
                     CustomOutputView()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(nil)
+                .onAppear {
+                    print("📄 Detail VStack appeared")
+                }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         HStack(spacing: 6) {
@@ -117,6 +129,7 @@ struct ContentView: View {
                         .padding(.leading, 12)
                         .padding(.trailing, 12)
                         .opacity(mainViewModel.fileTree.isEmpty ? 0 : 1)
+                        .animation(nil, value: mainViewModel.fileTree.isEmpty)
                         .disabled(mainViewModel.fileTree.isEmpty)
                         .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
                             let timestamp = Date().timeIntervalSince1970
@@ -127,6 +140,12 @@ struct ContentView: View {
             }
             .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
+        .onChange(of: columnVisibility) { oldValue, newValue in
+            let timestamp = Date().timeIntervalSince1970
+            print("🔄 [\(timestamp)] ========== SIDEBAR TOGGLED ==========")
+            print("🔄 [\(timestamp)] Sidebar visibility changed: \(oldValue) -> \(newValue)")
+            print("🔄 [\(timestamp)] Thread: \(Thread.isMainThread ? "Main" : "Background")")
+        }
         .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
             let timestamp = Date().timeIntervalSince1970
             print("📱 [\(timestamp)] ContentView: fileTree.isEmpty changed from \(oldValue) to \(newValue)")
