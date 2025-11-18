@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
     @EnvironmentObject var historyViewModel: HistoryViewModel
+    @State private var showCopySuccess = false
 
     var body: some View {
         NavigationSplitView {
@@ -49,9 +50,18 @@ struct ContentView: View {
                         HStack(spacing: 6) {
                             Button(action: {
                                 mainViewModel.copyToClipboard()
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    showCopySuccess = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        showCopySuccess = false
+                                    }
+                                }
                             }) {
-                                Image(systemName: "doc.on.doc")
+                                Image(systemName: showCopySuccess ? "checkmark" : "doc.on.doc")
                                     .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(showCopySuccess ? .green : .primary)
                             }
                             .buttonStyle(.plain)
                             .frame(width: 28, height: 28)
@@ -60,7 +70,7 @@ struct ContentView: View {
                                     .fill(.ultraThinMaterial)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 14)
-                                            .stroke(.black.opacity(0.08), lineWidth: 0.5)
+                                            .stroke(showCopySuccess ? Color.green.opacity(0.3) : Color.black.opacity(0.08), lineWidth: 0.5)
                                     )
                             )
 

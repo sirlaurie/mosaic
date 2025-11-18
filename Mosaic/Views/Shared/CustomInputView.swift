@@ -41,6 +41,7 @@ struct LocalInputView: View {
                 }
                 .foregroundColor(.primary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .focusable(false)

@@ -12,48 +12,54 @@ struct FileTreeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
+            HStack(spacing: 0) {
                 Rectangle()
                     .fill(.clear)
                     .frame(width: CGFloat(level * 20), height: 1)
 
+                // Expand/collapse button with larger hit area
                 if node.data.isDirectory {
                     Button(action: { node.isExpanded.toggle() }) {
                         Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.secondary)
-                            .frame(width: 12, height: 12)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 } else {
                     Rectangle()
                         .fill(.clear)
-                        .frame(width: 12, height: 12)
+                        .frame(width: 24, height: 24)
                 }
 
-                selectionIndicator
+                // Selection indicator and file info in a separate clickable area
+                HStack(spacing: 4) {
+                    selectionIndicator
+                    fileIcon
 
-                fileIcon
+                    let displayName = {
+                        let components = node.data.name.split(separator: "/")
+                        return components.last.map(String.init) ?? node.data.name
+                    }()
+                    Text(displayName)
+                        .font(.system(size: 13, weight: node.data.isDirectory ? .medium : .regular))
+                        .foregroundColor(node.isSelected ? .blue : .primary)
+                        .lineLimit(1)
 
-                let displayName = {
-                    let components = node.data.name.split(separator: "/")
-                    return components.last.map(String.init) ?? node.data.name
-                }()
-                Text(displayName)
-                    .font(.system(size: 13, weight: node.data.isDirectory ? .medium : .regular))
-                    .foregroundColor(node.isSelected ? .blue : .primary)
-                    .lineLimit(1)
-
-                Spacer()
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(node.isSelected ? Color.blue.opacity(0.1) : .clear)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { toggleSelection() }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(node.isSelected ? Color.blue.opacity(0.1) : .clear)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture { toggleSelection() }
+            .padding(.vertical, 2)
 
             if node.data.isDirectory, node.isExpanded {
                 let sortedChildren = getSortedChildren()

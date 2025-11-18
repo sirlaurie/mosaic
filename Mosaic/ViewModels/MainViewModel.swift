@@ -80,7 +80,7 @@ class MainViewModel: ObservableObject {
                 !isIgnored(filePath: $0.name, gitignoreRules: gitignoreRules)
             }
 
-            self.fileTree = buildFileTree(from: filteredFiles)
+            self.fileTree = buildFileTree(from: filteredFiles, rootURL: url)
 
             do {
                 try await historyService.addHistoryItem(path: url.path, type: .local)
@@ -222,9 +222,11 @@ class MainViewModel: ObservableObject {
         })
     }
 
-    private func buildFileTree(from files: [FileData]) -> [FileNode] {
-        let root = FileNode(
-            data: FileData(name: "", url: URL(fileURLWithPath: ""), isDirectory: true))
+    private func buildFileTree(from files: [FileData], rootURL: URL) -> [FileNode] {
+        // Create the root directory node with the actual directory name
+        let rootName = rootURL.lastPathComponent
+        let rootData = FileData(name: rootName, url: rootURL, isDirectory: true)
+        let root = FileNode(data: rootData)
         var nodeMap: [String: FileNode] = ["": root]
 
         for file in files.sorted(by: { $0.name < $1.name }) {
@@ -257,7 +259,8 @@ class MainViewModel: ObservableObject {
             node.children.sort { $0.data.name < $1.data.name }
         }
 
-        return root.children
+        // Return array containing the root directory node
+        return [root]
     }
 
     private func parseGitHubURL(_ urlString: String) throws -> (owner: String, repo: String) {
