@@ -22,7 +22,7 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
-        .animation(.spring(response: 0.25, dampingFraction: 1.0), value: columnVisibility)
+        .animation(.interpolatingSpring(stiffness: 300, damping: 30), value: columnVisibility)
         .onChange(of: columnVisibility) { oldValue, newValue in
             logSidebarToggle(oldValue, newValue)
         }
@@ -61,7 +61,6 @@ struct ContentView: View {
         .id("sidebar-content")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .fixedSize(horizontal: false, vertical: false)
-        .drawingGroup(opaque: false, colorMode: .nonLinear)
         .navigationSplitViewColumnWidth(min: 240, ideal: 280)
         .onAppear {
             print("📦 Sidebar VStack appeared")
