@@ -16,6 +16,12 @@ struct MosaicApp: App {
     @StateObject private var historyViewModel: HistoryViewModel
 
     init() {
+        print(String(repeating: "=", count: 60))
+        print("🚀 Mosaic App Starting...")
+        print("🔍 Logging is ENABLED")
+        print("⏰ Timestamp: \(Date().timeIntervalSince1970)")
+        print(String(repeating: "=", count: 60))
+
         let historyService = HistoryService()
         let gitHubAPIService = GitHubAPIService()
         let localFileService = LocalFileService()
@@ -28,6 +34,8 @@ struct MosaicApp: App {
             ))
         _historyViewModel = StateObject(
             wrappedValue: HistoryViewModel(historyService: historyService))
+
+        print("✅ ViewModels initialized")
     }
 
     var body: some Scene {
