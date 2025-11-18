@@ -52,7 +52,7 @@ class GitHubAPIService {
         let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(GitHubTreeResponse.self, from: data)
 
-        return buildTree(from: response.tree)
+        return buildTree(from: response.tree, repoName: repo)
     }
 
     private func fetchDefaultBranch(owner: String, repo: String, token: String?) async throws
@@ -111,9 +111,13 @@ class GitHubAPIService {
         return nullBytes > subset.count / 10  // 超过10%为null字节
     }
 
-    private func buildTree(from items: [GitHubTreeItem]) -> [FileNode] {
-        var nodeDict: [String: FileNode] = [:]
-        var rootItems: [FileNode] = []
+    private func buildTree(from items: [GitHubTreeItem], repoName: String) -> [FileNode] {
+        // Create root repository node
+        let rootURL = URL(string: "https://github.com/\(repoName)")!
+        let rootData = FileData(name: repoName, url: rootURL, isDirectory: true)
+        let rootNode = FileNode(data: rootData, children: [])
+
+        var nodeDict: [String: FileNode] = ["": rootNode]
 
         for item in items {
             guard let url = URL(string: item.url) else { continue }
@@ -131,7 +135,8 @@ class GitHubAPIService {
 
             if parentPath.isEmpty {
                 if let node = nodeDict[path] {
-                    rootItems.append(node)
+                    node.parent = rootNode
+                    rootNode.children.append(node)
                 }
             } else {
                 if let parentNode = nodeDict[parentPath], let childNode = nodeDict[path] {
@@ -141,6 +146,6 @@ class GitHubAPIService {
             }
         }
 
-        return rootItems
+        return [rootNode]
     }
 }
