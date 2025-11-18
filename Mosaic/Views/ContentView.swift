@@ -30,7 +30,6 @@ struct ContentView: View {
                             .frame(height: 80, alignment: .top)
                             .frame(maxWidth: .infinity, alignment: .top)
                             .fixedSize(horizontal: false, vertical: true)
-                            .transition(.move(edge: .top).combined(with: .opacity))
                             .onAppear {
                                 let timestamp = Date().timeIntervalSince1970
                                 print("✅ [\(timestamp)] CustomInputView appeared")
@@ -44,7 +43,6 @@ struct ContentView: View {
                     if !mainViewModel.fileTree.isEmpty {
                         FileTreeContainerView()
                             .frame(maxHeight: .infinity)
-                            .transition(.move(edge: .top).combined(with: .opacity))
                             .onAppear {
                                 let timestamp = Date().timeIntervalSince1970
                                 print("✅ [\(timestamp)] FileTreeContainerView appeared")
@@ -63,7 +61,13 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .fixedSize(horizontal: false, vertical: false)
-                .animation(nil)
+                .transaction { transaction in
+                    let timestamp = Date().timeIntervalSince1970
+                    if !transaction.animation.isEmpty {
+                        print("⚠️ [\(timestamp)] Sidebar: Unwanted animation detected, disabling it")
+                        transaction.animation = nil
+                    }
+                }
                 .navigationSplitViewColumnWidth(min: 240, ideal: 280)
                 .onAppear {
                     print("📦 Sidebar VStack appeared")
@@ -74,7 +78,13 @@ struct ContentView: View {
                     CustomOutputView()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(nil)
+                .transaction { transaction in
+                    let timestamp = Date().timeIntervalSince1970
+                    if !transaction.animation.isEmpty {
+                        print("⚠️ [\(timestamp)] Detail: Unwanted animation detected, disabling it")
+                        transaction.animation = nil
+                    }
+                }
                 .onAppear {
                     print("📄 Detail VStack appeared")
                 }
@@ -140,6 +150,15 @@ struct ContentView: View {
             }
             .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
+        .transaction { transaction in
+            let timestamp = Date().timeIntervalSince1970
+            if columnVisibility == .all || columnVisibility == .detailOnly {
+                if !transaction.animation.isEmpty {
+                    print("⚠️ [\(timestamp)] NavigationSplitView: Animation during sidebar toggle detected")
+                    print("   - Animation: \(transaction.animation)")
+                }
+            }
+        }
         .onChange(of: columnVisibility) { oldValue, newValue in
             let timestamp = Date().timeIntervalSince1970
             print("🔄 [\(timestamp)] ========== SIDEBAR TOGGLED ==========")
