@@ -47,6 +47,7 @@ struct HeaderView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.black.opacity(0.05))
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

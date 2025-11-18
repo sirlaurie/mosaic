@@ -68,15 +68,24 @@ class MainViewModel: ObservableObject {
         Task {
             isLoading = true
             errorMessage = nil
-            
+
             // 1. Get the flat list of files and gitignore rules from the service
             let (files, gitignoreRules) = await localFileService.scanDirectory(at: url)
-            
+
             // 2. Filter the files using the gitignore rules
             let filteredFiles = files.filter { !isIgnored(filePath: $0.name, gitignoreRules: gitignoreRules) }
 
             // 3. Build the nested FileNode tree from the filtered flat list
-            self.fileTree = buildFileTree(from: filteredFiles)
+            let childNodes = buildFileTree(from: filteredFiles)
+
+            // 4. Create root directory node to display the selected directory itself
+            let rootDirName = url.lastPathComponent
+            let rootData = FileData(name: rootDirName, url: url, isDirectory: true)
+            let rootNode = FileNode(data: rootData, children: childNodes)
+            // Set parent for all children
+            childNodes.forEach { $0.parent = rootNode }
+
+            self.fileTree = [rootNode]
 
             do {
                 try await historyService.addHistoryItem(path: url.path, type: .local)
@@ -84,7 +93,7 @@ class MainViewModel: ObservableObject {
             } catch {
                 self.errorMessage = error.localizedDescription
             }
-            
+
             isLoading = false
         }
     }
@@ -132,6 +141,14 @@ class MainViewModel: ObservableObject {
                 self.isLoading = false
             }
         }
+    }
+
+    func selectAll() {
+        fileTree.forEach { $0.propagateSelection(selected: true) }
+    }
+
+    func deselectAll() {
+        fileTree.forEach { $0.propagateSelection(selected: false) }
     }
 
     // MARK: - Private Helper Methods

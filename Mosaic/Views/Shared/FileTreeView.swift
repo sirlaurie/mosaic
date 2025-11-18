@@ -12,27 +12,49 @@ struct FileTreeView: View {
                     FileTreeView(node: childNode)
                 }
             } label: {
-                labelView
+                // 目录的 label 不包含复选框，避免点击冲突
+                HStack(spacing: 4) {
+                    checkboxView
+                    Image(systemName: "folder")
+                    Text(URL(fileURLWithPath: node.data.name).lastPathComponent)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
         } else {
-            labelView
+            // 文件的显示包含复选框
+            HStack(spacing: 4) {
+                checkboxView
+                Image(systemName: "doc")
+                Text(URL(fileURLWithPath: node.data.name).lastPathComponent)
+                Spacer()
+            }
+            .contentShape(Rectangle())
         }
     }
-    
-    private var labelView: some View {
-        // 我们不再需要 Toggle，因为 CheckboxToggleStyle 已经是一个 Button 了
-        HStack {
-            Image(systemName: node.data.isDirectory ? "folder" : "doc")
-            Text(URL(fileURLWithPath: node.data.name).lastPathComponent)
+
+    // 复选框视图，独立出来避免与折叠按钮冲突
+    private var checkboxView: some View {
+        Button(action: {
+            if node.data.isDirectory {
+                let shouldSelect = !node.isSelected && !node.isIndeterminate
+                node.propagateSelection(selected: shouldSelect)
+            } else {
+                node.isSelected.toggle()
+            }
+        }) {
+            Image(systemName: node.isSelected ? "checkmark.square.fill" : (node.isIndeterminate ? "minus.square.fill" : "square"))
+                .resizable()
+                .frame(width: 16, height: 16)
         }
-        .modifier(CheckboxModifier(node: node))
+        .buttonStyle(.plain)
     }
 }
 
-// 创建一个辅助的 ViewModifier 来附加复选框逻辑
+// 移除不再使用的 CheckboxModifier
 struct CheckboxModifier: ViewModifier {
     @ObservedObject var node: FileNode
-    
+
     func body(content: Content) -> some View {
         Button(action: {
             if node.data.isDirectory {

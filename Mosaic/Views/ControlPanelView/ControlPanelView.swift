@@ -21,6 +21,16 @@ public struct ControlPanelView: View {
                     Text("Selected Files")
                         .font(.headline)
                     Spacer()
+                    Button("Select All") {
+                        mainViewModel.selectAll()
+                    }
+                    .font(.system(size: 12))
+
+                    Button("Deselect All") {
+                        mainViewModel.deselectAll()
+                    }
+                    .font(.system(size: 12))
+
                     Button("Clear") {
                         mainViewModel.fileTree = []
                         mainViewModel.outputText = ""
