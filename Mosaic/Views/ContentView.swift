@@ -22,6 +22,7 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
+        .animation(.easeOut(duration: 0.15), value: columnVisibility)
         .onChange(of: columnVisibility) { oldValue, newValue in
             logSidebarToggle(oldValue, newValue)
         }
@@ -57,11 +58,9 @@ struct ContentView: View {
 
             historyOrEmptyView
         }
+        .id("sidebar-content")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .fixedSize(horizontal: false, vertical: false)
-        .transaction { transaction in
-            disableAnimationIfNeeded(&transaction, label: "Sidebar")
-        }
         .navigationSplitViewColumnWidth(min: 240, ideal: 280)
         .onAppear {
             print("📦 Sidebar VStack appeared")
@@ -114,10 +113,8 @@ struct ContentView: View {
         VStack(spacing: 0) {
             CustomOutputView()
         }
+        .id("detail-content")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .transaction { transaction in
-            disableAnimationIfNeeded(&transaction, label: "Detail")
-        }
         .onAppear {
             print("📄 Detail VStack appeared")
         }

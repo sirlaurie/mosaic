@@ -44,6 +44,7 @@ struct FileTreeContainerView: View {
                 }
                 .padding(.horizontal, 8)
             }
+            .drawingGroup()
 
             Button(action: {
                 mainViewModel.generateOutputText()
