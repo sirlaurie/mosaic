@@ -18,62 +18,14 @@ struct FileTreeContainerView: View {
                     .foregroundColor(.primary)
                 Spacer()
 
-                // Selection control buttons
-                HStack(spacing: 8) {
-                    Button(action: {
-                        selectAll()
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.square")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("All")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .foregroundColor(.blue)
-
-                    Button(action: {
-                        deselectAll()
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "square")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("None")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .foregroundColor(.blue)
-
-                    Button(action: {
-                        invertSelection()
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("Invert")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .foregroundColor(.blue)
-
-                    Divider()
-                        .frame(height: 12)
-
-                    Button("Clear") {
-                        mainViewModel.fileTree = []
-                        mainViewModel.outputText = ""
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Button("Clear") {
+                    mainViewModel.fileTree = []
+                    mainViewModel.outputText = ""
                 }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -126,34 +78,5 @@ struct FileTreeContainerView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 16)
-    }
-
-    private func selectAll() {
-        for node in mainViewModel.fileTree {
-            node.propagateSelection(selected: true)
-        }
-    }
-
-    private func deselectAll() {
-        for node in mainViewModel.fileTree {
-            node.propagateSelection(selected: false)
-        }
-    }
-
-    private func invertSelection() {
-        for node in mainViewModel.fileTree {
-            invertNodeSelection(node)
-        }
-    }
-
-    private func invertNodeSelection(_ node: FileNode) {
-        if !node.data.isDirectory {
-            node.isSelected.toggle()
-        } else {
-            for child in node.children {
-                invertNodeSelection(child)
-            }
-            node.updateSelectionFromChildren()
-        }
     }
 }
