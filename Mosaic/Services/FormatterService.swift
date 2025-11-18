@@ -1,8 +1,6 @@
-// File: /Mosaic/Services/FormatterService.swift
 import Foundation
 
 class FormatterService {
-    // 依赖注入文件读取服务
     private let localFileService: LocalFileService
     private let gitHubAPIService: GitHubAPIService
 
@@ -11,90 +9,192 @@ class FormatterService {
         self.gitHubAPIService = gitHubAPIService
     }
 
-    func format(selectedItems: [FileData], githubToken: String?) async -> String {
-        class IndexNode {
-            var children: [String: IndexNode] = [:]
+    func format(selectedItems: [FileData], rootDirectoryURL: URL, githubToken: String?) async
+        -> String
+    {
+        guard !selectedItems.isEmpty else {
+            return "Directory Structure:\n\n(No items selected)"
         }
 
-        let sortedItems = selectedItems.sorted { $0.name < $1.name }
-        let root = IndexNode()
+        let rootDirectoryName = extractRootDirectoryName(from: rootDirectoryURL)
 
-        // 1. Build the tree, correctly distinguishing files from directories
-        for item in sortedItems {
-            let pathComponents = item.name.split(separator: "/")
-            var currentNode = root
+        let (directories, files) = separateDirectoriesAndFiles(from: selectedItems)
 
-            // Create nodes for directory components
-            for i in 0..<(pathComponents.count - 1) {
-                let componentName = String(pathComponents[i])
-                if currentNode.children[componentName] == nil {
-                    currentNode.children[componentName] = IndexNode()
-                }
-                currentNode = currentNode.children[componentName]!
+        let directoryStructure = buildDirectoryStructure(
+            rootName: rootDirectoryName,
+            directories: directories,
+            files: files
+        )
+
+        let fileContents = await fetchFileContents(from: files, githubToken: githubToken)
+
+        let output = """
+        Directory Structure:
+
+        \(directoryStructure)
+
+        \(fileContents)
+        """
+
+        return output
+    }
+
+    private func separateDirectoriesAndFiles(from items: [FileData]) -> (
+        directories: [FileData], files: [FileData]
+    ) {
+        let directories = items.filter(\.isDirectory)
+        let files = items.filter { !$0.isDirectory }
+        return (directories, files)
+    }
+
+    private func extractRootDirectoryName(from rootDirectoryURL: URL) -> String {
+        if rootDirectoryURL.host?.contains("github.com") == true {
+            let pathComponents = rootDirectoryURL.pathComponents.filter { !$0.isEmpty }
+            if pathComponents.count >= 2 {
+                return pathComponents[1]
+            }
+            return "Repository"
+        }
+
+        let lastPathComponent = rootDirectoryURL.lastPathComponent
+        return lastPathComponent.isEmpty ? "Root" : lastPathComponent
+    }
+
+    private func buildDirectoryStructure(
+        rootName: String,
+        directories: [FileData],
+        files: [FileData]
+    ) -> String {
+        let rootNode = buildTreeStructure(directories: directories, files: files)
+
+        var result = "\(rootName)/\n"
+        result += generateTreeText(from: rootNode.children, prefix: "")
+
+        return result
+    }
+
+    private func buildTreeStructure(directories: [FileData], files: [FileData]) -> DirectoryNode {
+        let root = DirectoryNode(name: "", isDirectory: true)
+
+        for dir in directories {
+            addPathToTree(root, path: dir.name, isDirectory: true)
+        }
+
+        for file in files {
+            addPathToTree(root, path: file.name, isDirectory: false)
+        }
+
+        return root
+    }
+
+    private func addPathToTree(_ root: DirectoryNode, path: String, isDirectory: Bool) {
+        let pathComponents = path.components(separatedBy: "/")
+        var currentNode = root
+
+        for (index, component) in pathComponents.enumerated() {
+            let isLastComponent = (index == pathComponents.count - 1)
+
+            if currentNode.children[component] == nil {
+                let nodeIsDirectory = isLastComponent ? isDirectory : true
+                currentNode.children[component] = DirectoryNode(
+                    name: component, isDirectory: nodeIsDirectory
+                )
             }
 
-            // Create a leaf node for the file component
-            if let filename = pathComponents.last {
-                currentNode.children[String(filename)] = IndexNode() // Files are nodes with no children
+            currentNode = currentNode.children[component]!
+        }
+    }
+
+    private func generateTreeText(from children: [String: DirectoryNode], prefix: String) -> String {
+        var result = ""
+
+        let directories = children.filter(\.value.isDirectory)
+        let files = children.filter { !$0.value.isDirectory }
+
+        let sortedDirectories = directories.sorted { $0.key.lowercased() < $1.key.lowercased() }
+        let sortedFiles = files.sorted { $0.key.lowercased() < $1.key.lowercased() }
+
+        let sortedChildren = sortedDirectories + sortedFiles
+
+        for (index, (name, node)) in sortedChildren.enumerated() {
+            let isLast = (index == sortedChildren.count - 1)
+            let connector = isLast ? "└── " : "├── "
+            let nextPrefix = prefix + (isLast ? "    " : "│   ")
+
+            result += "\(prefix)\(connector)\(name)\n"
+
+            if node.isDirectory, !node.children.isEmpty {
+                result += generateTreeText(from: node.children, prefix: nextPrefix)
             }
         }
 
-        // 2. Build the string index from the tree
-        func buildIndex(node: IndexNode, prefix: String = "") -> String {
-            var result = ""
-            let entries = node.children.keys.sorted()
-            for (i, key) in entries.enumerated() {
-                let childNode = node.children[key]!
-                let isLastItem = i == entries.count - 1
-                let linePrefix = isLastItem ? "└── " : "├── "
-                let childPrefix = isLastItem ? "    " : "│   "
+        return result
+    }
 
-                result += "\(prefix)\(linePrefix)\(key)\n"
-                
-                // Only recurse if the child node is a directory (i.e., has children)
-                if !childNode.children.isEmpty {
-                    result += buildIndex(node: childNode, prefix: "\(prefix)\(childPrefix)")
-                }
-            }
-            return result
-        }
+    private func fetchFileContents(from files: [FileData], githubToken: String?) async -> String {
+        var fileContents: [String: String] = [:]
 
-        let index = buildIndex(node: root)
-        var output = "Directory Structure:\n\n\(index)"
+        // 限制并发数量，避免请求风暴
+        let maxConcurrentTasks = 20
 
-        // 3. Fetch and append file contents
-        var fileContentsText = ""
-        await withTaskGroup(of: (String, String).self) {
-            group in
-            for item in sortedItems {
+        await withTaskGroup(of: (String, String).self) { group in
+            var fileIterator = files.makeIterator()
+            var activeTasks = 0
+
+            // 初始化：启动前N个任务
+            while activeTasks < maxConcurrentTasks, let file = fileIterator.next() {
                 group.addTask {
-                    do {
-                        let content: String
-                        if item.url.scheme == "file" {
-                            content = try await self.localFileService.readFileContent(at: item.url)
-                        } else {
-                            content = try await self.gitHubAPIService.fetchFileContent(from: item.url, token: githubToken)
-                        }
-                        return (item.name, content)
-                    } catch {
-                        return (item.name, "Error reading file: \(error.localizedDescription)")
+                    await self.fetchSingleFile(file, githubToken: githubToken)
+                }
+                activeTasks += 1
+            }
+
+            // 处理结果并启动新任务
+            for await (path, content) in group {
+                fileContents[path] = content
+
+                // 当一个任务完成，启动下一个
+                if let nextFile = fileIterator.next() {
+                    group.addTask {
+                        await self.fetchSingleFile(nextFile, githubToken: githubToken)
                     }
                 }
             }
+        }
 
-            var fileContents: [String: String] = [:]
-            for await (path, content) in group {
-                fileContents[path] = content
-            }
-
-            for item in sortedItems {
-                if let content = fileContents[item.name] {
-                    fileContentsText += "\n\n---\nFile: \(item.name)\n---\n\n\(content)\n"
-                }
+        var result = ""
+        for file in files {
+            if let content = fileContents[file.name] {
+                result += "\n\n---\nFile: \(file.name)\n---\n\n\(content)\n"
             }
         }
 
-        output += fileContentsText
-        return output
+        return result
+    }
+
+    private func fetchSingleFile(_ file: FileData, githubToken: String?) async -> (String, String) {
+        do {
+            let content: String = if file.url.scheme == "file" {
+                try await self.localFileService.readFileContent(at: file.url)
+            } else {
+                try await self.gitHubAPIService.fetchFileContent(
+                    from: file.url, token: githubToken
+                )
+            }
+            return (file.name, content)
+        } catch {
+            return (file.name, "Error reading file: \(error.localizedDescription)")
+        }
+    }
+}
+
+private class DirectoryNode {
+    let name: String
+    var isDirectory: Bool
+    var children: [String: DirectoryNode] = [:]
+
+    init(name: String, isDirectory: Bool) {
+        self.name = name
+        self.isDirectory = isDirectory
     }
 }

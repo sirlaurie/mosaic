@@ -1,9 +1,7 @@
-
 //
 //  HistoryViewModel.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import Combine
@@ -17,8 +15,9 @@ class HistoryViewModel: ObservableObject {
     init(historyService: HistoryService) {
         self.historyService = historyService
 
-        // Listen for history updates
-        NotificationCenter.default.addObserver(self, selector: #selector(handleHistoryUpdate), name: .didUpdateHistory, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleHistoryUpdate), name: .didUpdateHistory, object: nil
+        )
     }
 
     func loadHistory() {
@@ -32,7 +31,6 @@ class HistoryViewModel: ObservableObject {
     }
 }
 
-// Define a notification name for history updates
 extension Notification.Name {
     static let didUpdateHistory = Notification.Name("didUpdateHistory")
 }

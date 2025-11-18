@@ -2,17 +2,15 @@
 //  MainViewModel.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import AppKit
 import Combine
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 class MainViewModel: ObservableObject {
-    // MARK: - Published Properties
-
     @Published var fileTree: [FileNode] = []
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
@@ -23,14 +21,16 @@ class MainViewModel: ObservableObject {
 
     @Published var outputText: String = ""
 
-    // MARK: - Services
+    private var rootDirectoryURL: URL?
+    nonisolated(unsafe) private var securityScopedURL: URL?  // 持有security-scoped resource，使用 nonisolated(unsafe) 以便在 deinit 中访问
+
+    @Published var selectedTab: Int = 0
+    @Published var currentTabType: TabType = .local
 
     private let gitHubAPIService: GitHubAPIService
     private let localFileService: LocalFileService
     private let historyService: HistoryService
     private let formatterService: FormatterService
-
-    // MARK: - Initialization
 
     init(
         gitHubAPIService: GitHubAPIService,
@@ -40,10 +40,10 @@ class MainViewModel: ObservableObject {
         self.gitHubAPIService = gitHubAPIService
         self.localFileService = localFileService
         self.historyService = historyService
-        formatterService = FormatterService(localFileService: localFileService, gitHubAPIService: gitHubAPIService)
+        formatterService = FormatterService(
+            localFileService: localFileService, gitHubAPIService: gitHubAPIService
+        )
     }
-
-    // MARK: - Public Methods
 
     func fetchGitHubRepository() {
         Task {
@@ -51,8 +51,13 @@ class MainViewModel: ObservableObject {
             errorMessage = nil
             do {
                 let (owner, repo) = try parseGitHubURL(githubURL)
-                let tree = try await gitHubAPIService.fetchRepositoryTree(owner: owner, repo: repo, token: githubToken)
+                let tree = try await gitHubAPIService.fetchRepositoryTree(
+                    owner: owner, repo: repo, token: githubToken
+                )
                 self.fileTree = tree
+
+                rootDirectoryURL = URL(string: "https://github.com/\(owner)/\(repo)")!
+
                 try await historyService.addHistoryItem(path: githubURL, type: .github)
                 NotificationCenter.default.post(name: .didUpdateHistory, object: nil)
             } catch {
@@ -68,14 +73,13 @@ class MainViewModel: ObservableObject {
         Task {
             isLoading = true
             errorMessage = nil
-            
-            // 1. Get the flat list of files and gitignore rules from the service
-            let (files, gitignoreRules) = await localFileService.scanDirectory(at: url)
-            
-            // 2. Filter the files using the gitignore rules
-            let filteredFiles = files.filter { !isIgnored(filePath: $0.name, gitignoreRules: gitignoreRules) }
 
-            // 3. Build the nested FileNode tree from the filtered flat list
+            let (files, gitignoreRules) = await localFileService.scanDirectory(at: url)
+
+            let filteredFiles = files.filter {
+                !isIgnored(filePath: $0.name, gitignoreRules: gitignoreRules)
+            }
+
             self.fileTree = buildFileTree(from: filteredFiles)
 
             do {
@@ -84,7 +88,7 @@ class MainViewModel: ObservableObject {
             } catch {
                 self.errorMessage = error.localizedDescription
             }
-            
+
             isLoading = false
         }
     }
@@ -97,10 +101,34 @@ class MainViewModel: ObservableObject {
 
         if openPanel.runModal() == .OK {
             if let url = openPanel.url {
-                _ = url.startAccessingSecurityScopedResource()
+                // 释放之前的security-scoped resource
+                stopAccessingSecurityScopedResource()
+
+                // 开始访问新的security-scoped resource
+                guard url.startAccessingSecurityScopedResource() else {
+                    errorMessage = "Failed to access the selected directory"
+                    return
+                }
+
+                securityScopedURL = url
                 localPath = url.path
+                rootDirectoryURL = url
                 selectLocalDirectory()
             }
+        }
+    }
+
+    private func stopAccessingSecurityScopedResource() {
+        if let url = securityScopedURL {
+            url.stopAccessingSecurityScopedResource()
+            securityScopedURL = nil
+        }
+    }
+
+    nonisolated deinit {
+        // URL.stopAccessingSecurityScopedResource() 是线程安全的
+        if let url = securityScopedURL {
+            url.stopAccessingSecurityScopedResource()
         }
     }
 
@@ -111,9 +139,9 @@ class MainViewModel: ObservableObject {
             fetchGitHubRepository()
         case .local:
             localPath = item.path
+            rootDirectoryURL = URL(fileURLWithPath: item.path)
             selectLocalDirectory()
         case .zip:
-            // Not implemented yet
             break
         }
     }
@@ -124,8 +152,18 @@ class MainViewModel: ObservableObject {
 
         let selectedFiles = collectSelectedItems(from: fileTree)
 
+        guard let rootURL = rootDirectoryURL else {
+            errorMessage = "No root directory selected"
+            isLoading = false
+            return
+        }
+
         Task {
-            let result = await formatterService.format(selectedItems: selectedFiles, githubToken: self.githubToken)
+            let result = await formatterService.format(
+                selectedItems: selectedFiles,
+                rootDirectoryURL: rootURL,
+                githubToken: self.githubToken
+            )
 
             await MainActor.run {
                 self.outputText = result
@@ -134,91 +172,59 @@ class MainViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Private Helper Methods
-    
-        private func isIgnored(filePath: String, gitignoreRules: [String]) -> Bool {
-    
-            return gitignoreRules.contains(where: { rule in
-    
-                var pattern = rule.trimmingCharacters(in: .whitespaces)
-    
-                guard !pattern.isEmpty, !pattern.hasPrefix("#") else { return false }
-    
-    
-    
-                let isAnchored = pattern.hasPrefix("/")
-    
-                if isAnchored {
-    
-                    pattern = String(pattern.dropFirst())
-    
-                }
-    
-    
-    
-                let isDirectory = pattern.hasSuffix("/")
-    
-                if isDirectory {
-    
-                    pattern = String(pattern.dropLast())
-    
-                }
-    
-    
-    
-                // Convert glob to regex
-    
-                pattern = pattern
-    
-                    .replacingOccurrences(of: ".", with: "\\.")
-    
-                    .replacingOccurrences(of: "*", with: "[^/]*") // More correct glob-to-regex for *
-    
-                    .replacingOccurrences(of: "?", with: ".")
-    
-    
-    
-                if !isAnchored {
-    
-                    pattern = "(^|/)" + pattern
-    
-                } else {
-    
-                    pattern = "^" + pattern
-    
-                }
-    
-    
-    
-                if isDirectory {
-    
-                    pattern += "(/.*)?$"
-    
-                } else {
-    
-                    pattern += "$"
-    
-                }
-    
-    
-    
-                if let regex = try? NSRegularExpression(pattern: pattern) {
-    
-                    let range = NSRange(location: 0, length: filePath.utf16.count)
-    
-                    return regex.firstMatch(in: filePath, options: [], range: range) != nil
-    
-                }
-    
-                return false
-    
-            })
-    
-        }
-    
+    private func isIgnored(filePath: String, gitignoreRules: [String]) -> Bool {
+        gitignoreRules.contains(where: { rule in
+            var pattern = rule.trimmingCharacters(in: .whitespaces)
+
+            guard !pattern.isEmpty, !pattern.hasPrefix("#") else { return false }
+
+            let isAnchored = pattern.hasPrefix("/")
+
+            if isAnchored {
+                pattern = String(pattern.dropFirst())
+            }
+
+            let isDirectory = pattern.hasSuffix("/")
+
+            if isDirectory {
+                pattern = String(pattern.dropLast())
+            }
+
+            pattern =
+                pattern
+
+                .replacingOccurrences(of: ".", with: "\\.")
+                .replacingOccurrences(of: "*", with: "[^/]*")
+                .replacingOccurrences(of: "?", with: ".")
+
+            if !isAnchored {
+                pattern = "(^|/)" + pattern
+
+            } else {
+                pattern = "^" + pattern
+            }
+
+            if isDirectory {
+                pattern += "(/.*)?$"
+
+            } else {
+                pattern += "$"
+            }
+
+            if let regex = try? NSRegularExpression(pattern: pattern) {
+                let range = NSRange(location: 0, length: filePath.utf16.count)
+
+                return regex.firstMatch(in: filePath, options: [], range: range) != nil
+            }
+
+            return false
+
+        })
+    }
+
     private func buildFileTree(from files: [FileData]) -> [FileNode] {
-        // Ported from the logic in repo2txt/js/utils.js displayDirectoryStructure
-        let root = FileNode(data: FileData(name: "", url: URL(fileURLWithPath: ""), isDirectory: true))
+        let root = FileNode(
+            data: FileData(name: "", url: URL(fileURLWithPath: ""), isDirectory: true))
         var nodeMap: [String: FileNode] = ["": root]
 
         for file in files.sorted(by: { $0.name < $1.name }) {
@@ -231,7 +237,9 @@ class MainViewModel: ObservableObject {
                 currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
 
                 if nodeMap[currentPath] == nil {
-                    let dirData = FileData(name: component, url: URL(fileURLWithPath: currentPath), isDirectory: true)
+                    let dirData = FileData(
+                        name: component, url: URL(fileURLWithPath: currentPath), isDirectory: true
+                    )
                     let newNode = FileNode(data: dirData)
                     nodeMap[currentPath] = newNode
                     nodeMap[parentPath]?.children.append(newNode)
@@ -244,8 +252,7 @@ class MainViewModel: ObservableObject {
             nodeMap[parentPath]?.children.append(fileNode)
             fileNode.parent = nodeMap[parentPath]
         }
-        
-        // Sort all children alphabetically
+
         for (_, node) in nodeMap {
             node.children.sort { $0.data.name < $1.data.name }
         }
@@ -254,26 +261,91 @@ class MainViewModel: ObservableObject {
     }
 
     private func parseGitHubURL(_ urlString: String) throws -> (owner: String, repo: String) {
-        guard let url = URL(string: urlString), url.host == "github.com" else {
+        // 支持多种格式的URL
+        var cleanedURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 如果没有scheme，添加https://
+        if !cleanedURL.hasPrefix("http://") && !cleanedURL.hasPrefix("https://") {
+            cleanedURL = "https://" + cleanedURL
+        }
+
+        guard let url = URL(string: cleanedURL) else {
             throw RepoError.invalidURL
         }
+
+        // 支持 github.com 和 www.github.com
+        guard let host = url.host,
+            host == "github.com" || host == "www.github.com"
+        else {
+            throw RepoError.invalidURL
+        }
+
+        // 获取路径组件，过滤掉 "/"
         let pathComponents = url.pathComponents.filter { $0 != "/" }
         guard pathComponents.count >= 2 else {
             throw RepoError.invalidURL
         }
-        return (owner: pathComponents[0], repo: pathComponents[1])
+
+        let owner = pathComponents[0]
+        var repo = pathComponents[1]
+
+        // 移除 .git 后缀
+        if repo.hasSuffix(".git") {
+            repo = String(repo.dropLast(4))
+        }
+
+        // 验证owner和repo格式（只包含字母、数字、连字符、下划线和点）
+        let validPattern = "^[a-zA-Z0-9._-]+$"
+        guard owner.range(of: validPattern, options: .regularExpression) != nil,
+            repo.range(of: validPattern, options: .regularExpression) != nil
+        else {
+            throw RepoError.invalidURL
+        }
+
+        return (owner: owner, repo: repo)
     }
 
     private func collectSelectedItems(from nodes: [FileNode]) -> [FileData] {
         var selected: [FileData] = []
+
         for node in nodes {
             if !node.data.isDirectory, node.isSelected {
                 selected.append(node.data)
             }
-            if node.children.isEmpty == false {
+
+            if !node.children.isEmpty {
                 selected.append(contentsOf: collectSelectedItems(from: node.children))
             }
         }
+
         return selected
+    }
+}
+
+extension MainViewModel {
+    func copyToClipboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(outputText, forType: .string)
+    }
+
+    func saveToFile() {
+        let savePanel = NSSavePanel()
+        if #available(macOS 12.0, *) {
+            savePanel.allowedContentTypes = [UTType.text]
+        } else {
+            savePanel.allowedFileTypes = ["txt"]
+        }
+        savePanel.nameFieldStringValue = "mosaic-output.txt"
+
+        savePanel.begin { response in
+            if response == .OK, let url = savePanel.url {
+                do {
+                    try self.outputText.write(to: url, atomically: true, encoding: .utf8)
+                } catch {
+                    self.errorMessage = "Error saving file: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 }

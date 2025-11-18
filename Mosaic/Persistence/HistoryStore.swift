@@ -1,26 +1,28 @@
-
 //
 //  HistoryStore.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import Foundation
 
-class HistoryStore {
+actor HistoryStore {
     private let storageURL: URL
 
     init() {
-        guard let appSupportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            fatalError("Unable to find application support directory.")
-        }
+        // 尝试获取Application Support目录，如果失败则使用临时目录
+        let appSupportDir = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask
+        ).first ?? FileManager.default.temporaryDirectory
+
         let bundleID = Bundle.main.bundleIdentifier ?? "com.example.Mosaic"
         let appDir = appSupportDir.appendingPathComponent(bundleID)
 
         // Create directory if it does not exist
         if !FileManager.default.fileExists(atPath: appDir.path) {
-            try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true, attributes: nil)
+            try? FileManager.default.createDirectory(
+                at: appDir, withIntermediateDirectories: true, attributes: nil
+            )
         }
 
         storageURL = appDir.appendingPathComponent("history.json")
@@ -34,7 +36,6 @@ class HistoryStore {
             let items = try JSONDecoder().decode([HistoryItem].self, from: data)
             return items
         } catch {
-            // If the file doesn't exist or there's a decoding error, return an empty array.
             return []
         }
     }

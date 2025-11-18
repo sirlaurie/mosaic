@@ -1,9 +1,7 @@
-
 //
 //  RepoError.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import Foundation

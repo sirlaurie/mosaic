@@ -2,7 +2,6 @@
 //  UtilityPanelView.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import SwiftUI
@@ -13,10 +12,8 @@ struct UtilityPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 标签页导航
             TabNavigationView()
 
-            // 工具面板内容
             if mainViewModel.fileTree.isEmpty {
                 InputPanelView()
             } else {
@@ -29,7 +26,6 @@ struct UtilityPanelView: View {
     }
 }
 
-// 标签页导航视图
 struct TabNavigationView: View {
     var body: some View {
         HStack(spacing: 0) {
@@ -50,13 +46,11 @@ struct TabNavigationView: View {
     }
 }
 
-// 输入面板视图
 struct InputPanelView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
     var body: some View {
         VStack(spacing: 20) {
-            // GitHub URL 输入框
             VStack(alignment: .leading, spacing: 8) {
                 Text("GitHub URL")
                     .font(.system(size: 13, weight: .medium))
@@ -71,7 +65,6 @@ struct InputPanelView: View {
             }
             .padding(.horizontal, 16)
 
-            // GitHub Token 输入框
             VStack(alignment: .leading, spacing: 8) {
                 Text("GitHub Token (Optional)")
                     .font(.system(size: 13, weight: .medium))
@@ -83,7 +76,6 @@ struct InputPanelView: View {
             }
             .padding(.horizontal, 16)
 
-            // 获取按钮
             Button(action: {
                 mainViewModel.fetchGitHubRepository()
             }) {
@@ -100,7 +92,6 @@ struct InputPanelView: View {
     }
 }
 
-// 文件选择面板视图
 struct FileSelectionPanelView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
@@ -120,7 +111,7 @@ struct FileSelectionPanelView: View {
             .padding([.horizontal, .top])
 
             List(mainViewModel.fileTree) { rootNode in
-                FileTreeView(node: rootNode)
+                FileTreeView(node: rootNode, level: 0)
             }
             .listStyle(.plain)
         }

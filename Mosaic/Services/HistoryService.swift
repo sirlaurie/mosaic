@@ -1,15 +1,14 @@
-
 //
 //  HistoryService.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import Foundation
 
 class HistoryService {
     private let historyStore: HistoryStore
+    private let maxHistoryItems = 50  // 最多保存50条历史记录
 
     init(historyStore: HistoryStore = HistoryStore()) {
         self.historyStore = historyStore
@@ -19,7 +18,6 @@ class HistoryService {
         do {
             return try await historyStore.load()
         } catch {
-            // If loading fails, return an empty array.
             return []
         }
     }
@@ -30,6 +28,11 @@ class HistoryService {
         var currentHistory = await loadHistory()
         currentHistory.removeAll { $0.path == newItem.path && $0.type == newItem.type }
         currentHistory.insert(newItem, at: 0)
+
+        // 限制历史记录数量
+        if currentHistory.count > maxHistoryItems {
+            currentHistory = Array(currentHistory.prefix(maxHistoryItems))
+        }
 
         try await historyStore.save(items: currentHistory)
     }

@@ -1,9 +1,7 @@
-
 //
 //  GitHubAPIService.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import Foundation
@@ -14,11 +12,14 @@ private struct GitHubTreeResponse: Codable {
 
 private struct GitHubTreeItem: Codable {
     let path: String
-    let type: String // "blob" or "tree"
+    let type: String
     let url: String
 }
 
-@MainActor
+private struct GitHubRepositoryResponse: Codable {
+    let default_branch: String
+}
+
 class GitHubAPIService {
     private let session: URLSession
 
@@ -26,53 +27,104 @@ class GitHubAPIService {
         self.session = session
     }
 
-    func fetchRepositoryTree(owner: String, repo: String, branch: String = "main", token: String?) async throws -> [FileNode] {
-        let urlString = "https://api.github.com/repos/\(owner)/\(repo)/git/trees/\(branch)?recursive=1"
+    func fetchRepositoryTree(owner: String, repo: String, branch: String? = nil, token: String?)
+        async throws -> [FileNode]
+    {
+        // 如果没有指定分支，先获取默认分支
+        let actualBranch: String
+        if let branch = branch {
+            actualBranch = branch
+        } else {
+            actualBranch = try await fetchDefaultBranch(owner: owner, repo: repo, token: token)
+        }
+
+        let urlString =
+            "https://api.github.com/repos/\(owner)/\(repo)/git/trees/\(actualBranch)?recursive=1"
         guard let url = URL(string: urlString) else {
             throw URLError(.badURL)
         }
 
         var request = URLRequest(url: url)
         if let token, !token.isEmpty {
-            request.addValue("token \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
         let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(GitHubTreeResponse.self, from: data)
 
-        // The GitHub API returns a flat list, so we need to build the tree structure.
         return buildTree(from: response.tree)
+    }
+
+    private func fetchDefaultBranch(owner: String, repo: String, token: String?) async throws
+        -> String
+    {
+        let urlString = "https://api.github.com/repos/\(owner)/\(repo)"
+        guard let url = URL(string: urlString) else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: url)
+        if let token, !token.isEmpty {
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, _) = try await session.data(for: request)
+        let response = try JSONDecoder().decode(GitHubRepositoryResponse.self, from: data)
+
+        return response.default_branch
     }
 
     func fetchFileContent(from url: URL, token: String?) async throws -> String {
         var request = URLRequest(url: url)
         if let token, !token.isEmpty {
-            request.addValue("token \(token)", forHTTPHeaderField: "Authorization")
+            request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
         let (data, _) = try await session.data(for: request)
-        // Assuming the content is base64 encoded, which it is for the git/blobs API.
-        // A more robust implementation would check the encoding type.
+
+        // 检查文件大小（限制10MB）
+        let maxFileSize = 10 * 1024 * 1024  // 10MB
+        if data.count > maxFileSize {
+            return "[File too large: \(data.count / 1024 / 1024)MB, skipped]"
+        }
+
+        // 检测是否为二进制文件
+        if isBinaryData(data) {
+            return "[Binary file, skipped]"
+        }
+
         guard let content = String(data: data, encoding: .utf8) else {
-            throw RepoError.decodingError(NSError(domain: "GitHubAPIService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to decode file content"]))
+            // 尝试其他编码
+            if let content = String(data: data, encoding: .ascii) {
+                return content
+            }
+            return "[Unable to decode file content]"
         }
         return content
+    }
+
+    private func isBinaryData(_ data: Data) -> Bool {
+        // 如果包含大量null字节，认为是二进制文件
+        let maxBytesToCheck = min(1024, data.count)
+        let subset = data.prefix(maxBytesToCheck)
+        let nullBytes = subset.filter { $0 == 0 }.count
+        return nullBytes > subset.count / 10  // 超过10%为null字节
     }
 
     private func buildTree(from items: [GitHubTreeItem]) -> [FileNode] {
         var nodeDict: [String: FileNode] = [:]
         var rootItems: [FileNode] = []
 
-        // Create all nodes
         for item in items {
             guard let url = URL(string: item.url) else { continue }
             let isDirectory = item.type == "tree"
-            let data = FileData(name: (item.path as NSString).lastPathComponent, url: url, isDirectory: isDirectory)
+            let data = FileData(
+                name: (item.path as NSString).lastPathComponent, url: url, isDirectory: isDirectory
+            )
             let newNode = FileNode(data: data, children: isDirectory ? [] : [])
             nodeDict[item.path] = newNode
         }
 
-        // Link nodes
         for item in items {
             let path = item.path
             let parentPath = (path as NSString).deletingLastPathComponent

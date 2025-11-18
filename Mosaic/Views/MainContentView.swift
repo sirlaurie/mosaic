@@ -2,7 +2,6 @@
 //  MainContentView.swift
 //  Mosaic
 //
-//  Created by Gemini on 2025/10/25.
 //
 
 import SwiftUI
@@ -13,32 +12,26 @@ struct MainContentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // 左侧工具面板 (180px宽度)
             UtilityPanelView()
 
-            // 分隔线
             Rectangle()
                 .fill(Color.black.opacity(0.1))
                 .frame(width: 0.5)
 
-            // 主内容区域
             ContentAreaView()
         }
         .frame(maxHeight: .infinity)
     }
 }
 
-// 内容区域视图
 struct ContentAreaView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
     var body: some View {
         VStack(spacing: 10) {
             if mainViewModel.fileTree.isEmpty {
-                // 空状态视图
                 EmptyStateView()
             } else {
-                // 文件树和输出视图
                 VStack(spacing: 10) {
                     FileTreeHeaderView()
                     OutputView()
@@ -54,7 +47,6 @@ struct ContentAreaView: View {
     }
 }
 
-// 空白状态视图
 struct EmptyStateView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
@@ -81,18 +73,17 @@ struct EmptyStateView: View {
 
     private var titleText: String {
         if !mainViewModel.outputText.isEmpty {
-            return "Generated Text"
+            "Generated Text"
         } else if !mainViewModel.githubURL.isEmpty {
-            return "GitHub Repository"
+            "GitHub Repository"
         } else if !mainViewModel.localPath.isEmpty {
-            return "Local Directory"
+            "Local Directory"
         } else {
-            return "Folder"
+            "Folder"
         }
     }
 }
 
-// 文件树头部视图
 struct FileTreeHeaderView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
@@ -113,7 +104,6 @@ struct FileTreeHeaderView: View {
     }
 }
 
-// 生成按钮视图
 struct GenerateButtonView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
