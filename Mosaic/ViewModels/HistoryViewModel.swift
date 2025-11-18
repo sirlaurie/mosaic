@@ -26,6 +26,17 @@ class HistoryViewModel: ObservableObject {
         }
     }
 
+    func clearHistory() {
+        Task {
+            do {
+                try await historyService.clearHistory()
+                self.historyItems = []
+            } catch {
+                print("Failed to clear history: \(error)")
+            }
+        }
+    }
+
     @objc private func handleHistoryUpdate() {
         loadHistory()
     }

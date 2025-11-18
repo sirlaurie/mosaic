@@ -68,4 +68,8 @@ class HistoryService {
 
         try await historyStore.save(items: currentHistory)
     }
+
+    func clearHistory() async throws {
+        try await historyStore.save(items: [])
+    }
 }

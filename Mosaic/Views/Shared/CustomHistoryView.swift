@@ -24,14 +24,27 @@ struct CustomHistoryView: View {
             if historyViewModel.historyItems.isEmpty {
                 emptyStateView
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(historyViewModel.historyItems.prefix(10)) { item in
-                            HistoryItemView(item: item)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(historyViewModel.historyItems.prefix(10)) { item in
+                                HistoryItemView(item: item)
+                            }
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+
+                    Divider()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+
+                    HStack {
+                        Spacer()
+                        ClearHistoryButton()
+                        Spacer()
+                    }
+                    .padding(.bottom, 12)
                 }
             }
         }
@@ -246,11 +259,7 @@ struct ClearHistoryButton: View {
     }
 
     private func clearHistory() {
-        Task {
-            await MainActor.run {
-                historyViewModel.historyItems = []
-            }
-        }
+        historyViewModel.clearHistory()
     }
 }
 
