@@ -132,6 +132,7 @@ struct HistoryItemView: View {
                             .stroke(.black.opacity(0.1), lineWidth: 0.5)
                     )
             )
+            .contentShape(Rectangle())
             .scaleEffect(1.0)
         }
         .buttonStyle(.plain)
