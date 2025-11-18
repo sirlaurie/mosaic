@@ -68,9 +68,7 @@ class MainViewModel: ObservableObject {
         }
     }
 
-    func selectLocalDirectory() {
-        guard !localPath.isEmpty, let url = URL(string: "file://\(localPath)") else { return }
-
+    func selectLocalDirectory(url: URL) {
         Task {
             isLoading = true
             errorMessage = nil
@@ -84,7 +82,7 @@ class MainViewModel: ObservableObject {
             self.fileTree = buildFileTree(from: filteredFiles, rootURL: url)
 
             do {
-                try await historyService.addHistoryItem(path: url.path, type: .local)
+                try await historyService.addHistoryItem(url: url, type: .local)
                 NotificationCenter.default.post(name: .didUpdateHistory, object: nil)
             } catch {
                 self.errorMessage = error.localizedDescription
@@ -114,7 +112,7 @@ class MainViewModel: ObservableObject {
                 securityScopedURL = url
                 localPath = url.path
                 rootDirectoryURL = url
-                selectLocalDirectory()
+                selectLocalDirectory(url: url)
             }
         }
     }
@@ -139,11 +137,45 @@ class MainViewModel: ObservableObject {
             githubURL = item.path
             fetchGitHubRepository()
         case .local:
-            localPath = item.path
-            rootDirectoryURL = URL(fileURLWithPath: item.path)
-            selectLocalDirectory()
+            loadLocalDirectory(from: item)
         case .zip:
             break
+        }
+    }
+
+    private func loadLocalDirectory(from item: HistoryItem) {
+        // Try to restore URL from bookmark data
+        if let bookmarkData = item.bookmarkData {
+            var isStale = false
+            do {
+                let url = try URL(
+                    resolvingBookmarkData: bookmarkData,
+                    options: .withSecurityScope,
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                )
+
+                // 释放之前的security-scoped resource
+                stopAccessingSecurityScopedResource()
+
+                // Start accessing the security-scoped resource
+                guard url.startAccessingSecurityScopedResource() else {
+                    errorMessage = "Failed to access directory: \(item.path). Please select it again."
+                    return
+                }
+
+                securityScopedURL = url
+                localPath = url.path
+                rootDirectoryURL = url
+                selectLocalDirectory(url: url)
+                return
+            } catch {
+                // Bookmark is invalid, show error
+                errorMessage = "Cannot access directory: \(item.path). The directory may have been moved or deleted."
+            }
+        } else {
+            // No bookmark data, show error
+            errorMessage = "Cannot access directory: \(item.path). Please select it again from the file browser."
         }
     }
 

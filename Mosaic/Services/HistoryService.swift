@@ -36,4 +36,36 @@ class HistoryService {
 
         try await historyStore.save(items: currentHistory)
     }
+
+    func addHistoryItem(url: URL, type: HistoryItem.HistoryType) async throws {
+        var bookmarkData: Data? = nil
+
+        // For local directories, create a security-scoped bookmark
+        if type == .local {
+            bookmarkData = try? url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        }
+
+        let newItem = HistoryItem(
+            id: UUID(),
+            path: url.path,
+            type: type,
+            accessDate: Date(),
+            bookmarkData: bookmarkData
+        )
+
+        var currentHistory = await loadHistory()
+        currentHistory.removeAll { $0.path == newItem.path && $0.type == newItem.type }
+        currentHistory.insert(newItem, at: 0)
+
+        // 限制历史记录数量
+        if currentHistory.count > maxHistoryItems {
+            currentHistory = Array(currentHistory.prefix(maxHistoryItems))
+        }
+
+        try await historyStore.save(items: currentHistory)
+    }
 }
