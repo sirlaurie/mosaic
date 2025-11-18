@@ -15,6 +15,7 @@ struct FileTreeContainerView: View {
             let timestamp = Date().timeIntervalSince1970
             print("🌲 [\(timestamp)] FileTreeContainerView: body evaluated")
             print("   - fileTree.count: \(mainViewModel.fileTree.count)")
+            print("   - Thread: \(Thread.isMainThread ? "Main" : "Background")")
         }()
         VStack(spacing: 8) {
             HStack {
@@ -44,7 +45,6 @@ struct FileTreeContainerView: View {
                 }
                 .padding(.horizontal, 8)
             }
-            .drawingGroup()
 
             Button(action: {
                 mainViewModel.generateOutputText()
