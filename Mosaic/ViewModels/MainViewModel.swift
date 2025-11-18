@@ -20,6 +20,7 @@ class MainViewModel: ObservableObject {
     @Published var localPath: String = ""
 
     @Published var outputText: String = ""
+    @Published var isShowingFileExporter = false
 
     private var rootDirectoryURL: URL?
     nonisolated(unsafe) private var securityScopedURL: URL?  // 持有security-scoped resource，使用 nonisolated(unsafe) 以便在 deinit 中访问
@@ -330,25 +331,5 @@ extension MainViewModel {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(outputText, forType: .string)
-    }
-
-    func saveToFile() {
-        let savePanel = NSSavePanel()
-        if #available(macOS 12.0, *) {
-            savePanel.allowedContentTypes = [UTType.text]
-        } else {
-            savePanel.allowedFileTypes = ["txt"]
-        }
-        savePanel.nameFieldStringValue = "mosaic-output.txt"
-
-        savePanel.begin { response in
-            if response == .OK, let url = savePanel.url {
-                do {
-                    try self.outputText.write(to: url, atomically: true, encoding: .utf8)
-                } catch {
-                    self.errorMessage = "Error saving file: \(error.localizedDescription)"
-                }
-            }
-        }
     }
 }

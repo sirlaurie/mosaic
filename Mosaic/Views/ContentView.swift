@@ -77,7 +77,7 @@ struct ContentView: View {
                             Spacer()
 
                             Button(action: {
-                                mainViewModel.saveToFile()
+                                mainViewModel.isShowingFileExporter = true
                             }) {
                                 Image(systemName: "arrow.down.circle")
                                     .font(.system(size: 15, weight: .medium))
@@ -100,8 +100,45 @@ struct ContentView: View {
             }
             .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
+        .fileExporter(
+            isPresented: $mainViewModel.isShowingFileExporter,
+            document: TextDocument(text: mainViewModel.outputText),
+            contentType: .plainText,
+            defaultFilename: "mosaic-output.txt"
+        ) { result in
+            switch result {
+            case .success:
+                break
+            case .failure(let error):
+                mainViewModel.errorMessage = "Error saving file: \(error.localizedDescription)"
+            }
+        }
         .onAppear {
             historyViewModel.loadHistory()
         }
+    }
+}
+
+struct TextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+
+    var text: String
+
+    init(text: String) {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents,
+              let string = String(data: data, encoding: .utf8)
+        else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        text = string
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let data = text.data(using: .utf8)!
+        return .init(regularFileWithContents: data)
     }
 }
