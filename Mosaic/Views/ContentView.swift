@@ -117,7 +117,6 @@ struct ContentView: View {
                         .padding(.leading, 12)
                         .padding(.trailing, 12)
                         .opacity(mainViewModel.fileTree.isEmpty ? 0 : 1)
-                        .animation(.easeInOut(duration: 0.25), value: mainViewModel.fileTree.isEmpty)
                         .disabled(mainViewModel.fileTree.isEmpty)
                         .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
                             let timestamp = Date().timeIntervalSince1970
