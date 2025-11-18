@@ -51,54 +51,57 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        HStack(spacing: 6) {
-                            Button(action: {
-                                mainViewModel.copyToClipboard()
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    showCopySuccess = true
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        if !mainViewModel.fileTree.isEmpty {
+                            HStack(spacing: 6) {
+                                Button(action: {
+                                    mainViewModel.copyToClipboard()
                                     withAnimation(.easeInOut(duration: 0.2)) {
-                                        showCopySuccess = false
+                                        showCopySuccess = true
                                     }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            showCopySuccess = false
+                                        }
+                                    }
+                                }) {
+                                    Image(systemName: showCopySuccess ? "checkmark" : "doc.on.doc")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(showCopySuccess ? .green : .primary)
                                 }
-                            }) {
-                                Image(systemName: showCopySuccess ? "checkmark" : "doc.on.doc")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(showCopySuccess ? .green : .primary)
-                            }
-                            .buttonStyle(.plain)
-                            .frame(width: 28, height: 28)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(.ultraThinMaterial)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14)
-                                            .stroke(showCopySuccess ? Color.green.opacity(0.3) : Color.black.opacity(0.08), lineWidth: 0.5)
-                                    )
-                            )
+                                .buttonStyle(.plain)
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(.ultraThinMaterial)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .stroke(showCopySuccess ? Color.green.opacity(0.3) : Color.black.opacity(0.08), lineWidth: 0.5)
+                                        )
+                                )
 
-                            Spacer()
+                                Spacer()
 
-                            Button(action: {
-                                mainViewModel.isShowingFileExporter = true
-                            }) {
-                                Image(systemName: "arrow.down.circle")
-                                    .font(.system(size: 15, weight: .medium))
+                                Button(action: {
+                                    mainViewModel.isShowingFileExporter = true
+                                }) {
+                                    Image(systemName: "arrow.down.circle")
+                                        .font(.system(size: 15, weight: .medium))
+                                }
+                                .buttonStyle(.plain)
+                                .frame(width: 28, height: 28)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(.ultraThinMaterial)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .stroke(.black.opacity(0.08), lineWidth: 0.5)
+                                        )
+                                )
                             }
-                            .buttonStyle(.plain)
-                            .frame(width: 28, height: 28)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(.ultraThinMaterial)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14)
-                                            .stroke(.black.opacity(0.08), lineWidth: 0.5)
-                                    )
-                            )
+                            .padding(.leading, 12)
+                            .padding(.trailing, 12)
+                            .transition(.opacity)
                         }
-                        .padding(.leading, 12)
-                        .padding(.trailing, 12)
                     }
                 }
             }
