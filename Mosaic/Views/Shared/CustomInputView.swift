@@ -205,6 +205,7 @@ struct ActionButton: View {
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: size.cornerRadius))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .focusable(false)

@@ -26,6 +26,7 @@ struct FileTreeContainerView: View {
                 .focusable(false)
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .contentShape(Rectangle())
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -61,6 +62,7 @@ struct FileTreeContainerView: View {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(mainViewModel.isLoading ? Color.gray.opacity(0.5) : Color.blue)
                 )
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .focusable(false)

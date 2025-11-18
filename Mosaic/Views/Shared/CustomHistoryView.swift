@@ -246,6 +246,7 @@ struct ClearHistoryButton: View {
                             .stroke(.red.opacity(0.3), lineWidth: 1)
                     )
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .alert("Clear History", isPresented: $showingClearConfirmation) {
