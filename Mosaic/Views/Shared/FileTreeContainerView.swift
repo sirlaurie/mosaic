@@ -11,6 +11,11 @@ struct FileTreeContainerView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
     var body: some View {
+        let _ = {
+            let timestamp = Date().timeIntervalSince1970
+            print("🌲 [\(timestamp)] FileTreeContainerView: body evaluated")
+            print("   - fileTree.count: \(mainViewModel.fileTree.count)")
+        }()
         VStack(spacing: 8) {
             HStack {
                 Text("Selected Files")

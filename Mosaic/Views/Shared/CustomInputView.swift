@@ -10,6 +10,10 @@ struct CustomInputView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
     var body: some View {
+        let _ = {
+            let timestamp = Date().timeIntervalSince1970
+            print("📥 [\(timestamp)] CustomInputView: body evaluated")
+        }()
         VStack(spacing: 12) {
             switch mainViewModel.currentTabType {
             case .local:

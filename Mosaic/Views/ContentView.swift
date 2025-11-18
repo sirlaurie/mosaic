@@ -11,6 +11,7 @@ struct ContentView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
     @EnvironmentObject var historyViewModel: HistoryViewModel
     @State private var showCopySuccess = false
+    @State private var previousFileTreeState = true // Track previous isEmpty state
 
     var body: some View {
         NavigationSplitView {
@@ -26,12 +27,28 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, alignment: .top)
                             .fixedSize(horizontal: false, vertical: true)
                             .transition(.move(edge: .top).combined(with: .opacity))
+                            .onAppear {
+                                let timestamp = Date().timeIntervalSince1970
+                                print("✅ [\(timestamp)] CustomInputView appeared")
+                            }
+                            .onDisappear {
+                                let timestamp = Date().timeIntervalSince1970
+                                print("❌ [\(timestamp)] CustomInputView disappeared")
+                            }
                     }
 
                     if !mainViewModel.fileTree.isEmpty {
                         FileTreeContainerView()
                             .frame(maxHeight: .infinity)
                             .transition(.move(edge: .top).combined(with: .opacity))
+                            .onAppear {
+                                let timestamp = Date().timeIntervalSince1970
+                                print("✅ [\(timestamp)] FileTreeContainerView appeared")
+                            }
+                            .onDisappear {
+                                let timestamp = Date().timeIntervalSince1970
+                                print("❌ [\(timestamp)] FileTreeContainerView disappeared")
+                            }
                     } else if mainViewModel.currentTabType == .local {
                         CustomHistoryView()
                             .frame(maxHeight: .infinity)
@@ -102,11 +119,20 @@ struct ContentView: View {
                         .opacity(mainViewModel.fileTree.isEmpty ? 0 : 1)
                         .animation(.easeInOut(duration: 0.25), value: mainViewModel.fileTree.isEmpty)
                         .disabled(mainViewModel.fileTree.isEmpty)
+                        .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
+                            let timestamp = Date().timeIntervalSince1970
+                            print("🎯 [\(timestamp)] Toolbar: fileTree.isEmpty changed from \(oldValue) to \(newValue)")
+                        }
                     }
                 }
             }
             .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
+        .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
+            let timestamp = Date().timeIntervalSince1970
+            print("📱 [\(timestamp)] ContentView: fileTree.isEmpty changed from \(oldValue) to \(newValue)")
+            print("📊 [\(timestamp)] ContentView: fileTree.count = \(mainViewModel.fileTree.count)")
+        }
         .fileExporter(
             isPresented: $mainViewModel.isShowingFileExporter,
             document: TextDocument(text: mainViewModel.outputText),

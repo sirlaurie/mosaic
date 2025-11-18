@@ -11,7 +11,15 @@ import UniformTypeIdentifiers
 
 @MainActor
 class MainViewModel: ObservableObject {
-    @Published var fileTree: [FileNode] = []
+    @Published var fileTree: [FileNode] = [] {
+        didSet {
+            let timestamp = Date().timeIntervalSince1970
+            print("🌳 [\(timestamp)] MainViewModel: fileTree changed")
+            print("   - Old count: \(oldValue.count), New count: \(fileTree.count)")
+            print("   - isEmpty: \(fileTree.isEmpty)")
+            print("   - Thread: \(Thread.isMainThread ? "Main" : "Background")")
+        }
+    }
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
 
