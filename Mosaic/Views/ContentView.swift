@@ -207,7 +207,7 @@ struct ContentView: View {
 
     private func disableAnimationIfNeeded(_ transaction: inout Transaction, label: String) {
         let timestamp = Date().timeIntervalSince1970
-        if !transaction.animation.isEmpty {
+        if transaction.animation != nil {
             print("⚠️ [\(timestamp)] \(label): Unwanted animation detected, disabling it")
             transaction.animation = nil
         }
