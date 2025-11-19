@@ -11,21 +11,15 @@ struct ContentView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
     @EnvironmentObject var historyViewModel: HistoryViewModel
     @State private var showCopySuccess = false
-    @State private var previousFileTreeState = true
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView {
             sidebarContent
         } detail: {
             detailContent
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
-        .animation(.interpolatingSpring(stiffness: 300, damping: 30), value: columnVisibility)
-        .onChange(of: columnVisibility) { oldValue, newValue in
-            logSidebarToggle(oldValue, newValue)
-        }
         .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
             logFileTreeChange(oldValue, newValue)
         }
@@ -200,21 +194,6 @@ struct ContentView: View {
                 showCopySuccess = false
             }
         }
-    }
-
-    private func disableAnimationIfNeeded(_ transaction: inout Transaction, label: String) {
-        let timestamp = Date().timeIntervalSince1970
-        if transaction.animation != nil {
-            print("⚠️ [\(timestamp)] \(label): Unwanted animation detected, disabling it")
-            transaction.animation = nil
-        }
-    }
-
-    private func logSidebarToggle(_ oldValue: NavigationSplitViewVisibility, _ newValue: NavigationSplitViewVisibility) {
-        let timestamp = Date().timeIntervalSince1970
-        print("🔄 [\(timestamp)] ========== SIDEBAR TOGGLED ==========")
-        print("🔄 [\(timestamp)] Sidebar visibility changed: \(oldValue) -> \(newValue)")
-        print("🔄 [\(timestamp)] Thread: \(Thread.isMainThread ? "Main" : "Background")")
     }
 
     private func logFileTreeChange(_ oldValue: Bool, _ newValue: Bool) {
