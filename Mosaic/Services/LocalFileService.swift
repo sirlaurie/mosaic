@@ -4,8 +4,26 @@ import Foundation
 class LocalFileService {
     func scanDirectory(at url: URL) async -> (files: [FileData], gitignore: [String]) {
         await Task.detached(priority: .userInitiated) {
+            let startTime = Date()
+            print("📂 [LocalFileService] Starting to scan directory: \(url.lastPathComponent)")
+
             var files: [FileData] = []
             var gitignoreRules = [".git/**"]
+            let maxFiles = 50000  // 限制最大文件数，避免处理过大的目录
+
+            // 需要跳过的大型目录
+            let skipDirectories: Set<String> = [
+                ".git",
+                "node_modules",
+                ".venv",
+                "venv",
+                "target",
+                "build",
+                "dist",
+                ".gradle",
+                ".idea",
+                "__pycache__"
+            ]
 
             // Security-scoped resource 由调用方管理，不在这里重复访问
             // 因为 Task.detached 会在不同线程执行，重复调用可能导致问题
@@ -23,6 +41,13 @@ class LocalFileService {
 
             // 第一遍：收集所有.gitignore规则（迭代式处理，避免内存炸弹）
             while let fileURL = enumerator.nextObject() as? URL {
+                // 跳过大型依赖目录
+                let dirName = fileURL.lastPathComponent
+                if skipDirectories.contains(dirName) {
+                    enumerator.skipDescendants()
+                    continue
+                }
+
                 if fileURL.lastPathComponent == ".gitignore" {
                     if let content = try? String(contentsOf: fileURL, encoding: .utf8) {
                         let lines = content.split(whereSeparator: \.isNewline)
@@ -56,6 +81,19 @@ class LocalFileService {
 
             // 第二遍：收集文件（迭代式处理）
             while let fileURL = fileEnumerator.nextObject() as? URL {
+                // 限制文件数量，避免内存溢出
+                if files.count >= maxFiles {
+                    print("⚠️ [LocalFileService] Reached maximum file limit (\(maxFiles)), stopping scan")
+                    break
+                }
+
+                // 跳过大型依赖目录
+                let dirName = fileURL.lastPathComponent
+                if skipDirectories.contains(dirName) {
+                    fileEnumerator.skipDescendants()
+                    continue
+                }
+
                 guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)),
                     let isDirectory = resourceValues.isDirectory,
                     resourceValues.name != nil
@@ -70,6 +108,9 @@ class LocalFileService {
                     files.append(data)
                 }
             }
+
+            let duration = Date().timeIntervalSince(startTime)
+            print("✅ [LocalFileService] Scan completed in \(String(format: "%.2f", duration))s, found \(files.count) files")
 
             return (files, gitignoreRules)
         }.value
