@@ -146,6 +146,9 @@ class GitHubAPIService {
             }
         }
 
+        // Expand the root node so user can see the first level
+        rootNode.isExpanded = true
+
         return [rootNode]
     }
 }

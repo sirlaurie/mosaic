@@ -300,6 +300,9 @@ class MainViewModel: ObservableObject {
             node.children.sort { $0.data.name < $1.data.name }
         }
 
+        // Expand the root node so user can see the first level
+        root.isExpanded = true
+
         // Return array containing the root directory node
         return [root]
     }

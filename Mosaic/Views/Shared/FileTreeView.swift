@@ -11,6 +11,10 @@ struct FileTreeView: View {
     let level: Int
 
     var body: some View {
+        let _ = {
+            let timestamp = Date().timeIntervalSince1970
+            print("🌿 [\(timestamp)] FileTreeView rendering: \(node.data.name), level: \(level), isExpanded: \(node.isExpanded), children: \(node.children.count)")
+        }()
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 Rectangle()

@@ -24,7 +24,7 @@ class FileNode: Identifiable, ObservableObject, Hashable {
     }
 
     @Published var isIndeterminate: Bool
-    @Published var isExpanded: Bool = true
+    @Published var isExpanded: Bool = false
 
     weak var parent: FileNode?
 
