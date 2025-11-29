@@ -114,7 +114,8 @@ struct GenerateButton: View {
             HStack(spacing: 8) {
                 if mainViewModel.isLoading {
                     ProgressView()
-                        .scaleEffect(0.8)
+                        .controlSize(.small)
+                        .frame(width: 14, height: 14)
                 } else {
                     Image(systemName: "text.alignleft")
                         .font(.system(size: 14, weight: .medium))
@@ -159,7 +160,8 @@ struct TextStatsView: View {
             if isLoading {
                 HStack(spacing: 4) {
                     ProgressView()
-                        .scaleEffect(0.6)
+                        .controlSize(.mini)
+                        .frame(width: 10, height: 10)
                     Text("Processing...")
                         .font(.caption2)
                         .foregroundColor(.secondary)

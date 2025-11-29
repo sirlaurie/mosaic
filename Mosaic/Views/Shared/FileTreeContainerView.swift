@@ -52,8 +52,9 @@ struct FileTreeContainerView: View {
                 HStack(spacing: 6) {
                     if mainViewModel.isLoading {
                         ProgressView()
-                            .scaleEffect(0.7)
+                            .controlSize(.small)
                             .tint(.white)
+                            .frame(width: 13, height: 13)
                     } else {
                         Image(systemName: "text.alignleft")
                             .font(.system(size: 13, weight: .medium))

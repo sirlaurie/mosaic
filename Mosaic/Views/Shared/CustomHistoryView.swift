@@ -269,7 +269,8 @@ struct HistoryLoadingView: View {
     var body: some View {
         HStack(spacing: 8) {
             ProgressView()
-                .scaleEffect(0.8)
+                .controlSize(.small)
+                .frame(width: 16, height: 16)
 
             Text("Loading history...")
                 .font(.caption)
