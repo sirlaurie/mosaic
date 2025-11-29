@@ -22,11 +22,12 @@ class LocalFileService {
                 "dist",
                 ".gradle",
                 ".idea",
-                "__pycache__"
+                "__pycache__",
+                "Pods",
+                "vendor",
+                ".next",
+                "out"
             ]
-
-            // Security-scoped resource 由调用方管理，不在这里重复访问
-            // 因为 Task.detached 会在不同线程执行，重复调用可能导致问题
 
             let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey, .isSymbolicLinkKey]
             guard
@@ -39,16 +40,44 @@ class LocalFileService {
                 return ([], gitignoreRules)
             }
 
-            // 第一遍：收集所有.gitignore规则（迭代式处理，避免内存炸弹）
+            var fileCount = 0
+            var dirCount = 0
+            var skippedCount = 0
+
+            // 单遍扫描：同时收集文件和 gitignore 规则
             while let fileURL = enumerator.nextObject() as? URL {
-                // 跳过大型依赖目录
+                // 限制文件数量，避免内存溢出
+                if files.count >= maxFiles {
+                    print("⚠️ [LocalFileService] Reached maximum file limit (\(maxFiles)), stopping scan")
+                    break
+                }
+
+                // 立即检查并跳过大型依赖目录
                 let dirName = fileURL.lastPathComponent
                 if skipDirectories.contains(dirName) {
                     enumerator.skipDescendants()
+                    skippedCount += 1
                     continue
                 }
 
-                if fileURL.lastPathComponent == ".gitignore" {
+                // 检查是否是目录
+                guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)),
+                      let isDirectory = resourceValues.isDirectory
+                else { continue }
+
+                if isDirectory {
+                    dirCount += 1
+                } else {
+                    fileCount += 1
+                    // 收集文件
+                    let relativePath = fileURL.path.replacingOccurrences(of: url.path, with: "")
+                    let cleanPath = relativePath.starts(with: "/") ? String(relativePath.dropFirst()) : relativePath
+                    let data = FileData(name: cleanPath, url: fileURL, isDirectory: false)
+                    files.append(data)
+                }
+
+                // 收集 .gitignore 规则
+                if dirName == ".gitignore" {
                     if let content = try? String(contentsOf: fileURL, encoding: .utf8) {
                         let lines = content.split(whereSeparator: \.isNewline)
                         let gitignorePath = fileURL.deletingLastPathComponent().path
@@ -68,49 +97,9 @@ class LocalFileService {
                 }
             }
 
-            // 重新创建enumerator进行第二遍扫描
-            guard
-                let fileEnumerator = FileManager.default.enumerator(
-                    at: url,
-                    includingPropertiesForKeys: keys,
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
-                )
-            else {
-                return ([], gitignoreRules)
-            }
-
-            // 第二遍：收集文件（迭代式处理）
-            while let fileURL = fileEnumerator.nextObject() as? URL {
-                // 限制文件数量，避免内存溢出
-                if files.count >= maxFiles {
-                    print("⚠️ [LocalFileService] Reached maximum file limit (\(maxFiles)), stopping scan")
-                    break
-                }
-
-                // 跳过大型依赖目录
-                let dirName = fileURL.lastPathComponent
-                if skipDirectories.contains(dirName) {
-                    fileEnumerator.skipDescendants()
-                    continue
-                }
-
-                guard let resourceValues = try? fileURL.resourceValues(forKeys: Set(keys)),
-                    let isDirectory = resourceValues.isDirectory,
-                    resourceValues.name != nil
-                else { continue }
-
-                let relativePath = fileURL.path.replacingOccurrences(of: url.path, with: "")
-                let cleanPath =
-                    relativePath.starts(with: "/") ? String(relativePath.dropFirst()) : relativePath
-
-                if !isDirectory {
-                    let data = FileData(name: cleanPath, url: fileURL, isDirectory: isDirectory)
-                    files.append(data)
-                }
-            }
-
             let duration = Date().timeIntervalSince(startTime)
-            print("✅ [LocalFileService] Scan completed in \(String(format: "%.2f", duration))s, found \(files.count) files")
+            print("✅ [LocalFileService] Scan completed in \(String(format: "%.2f", duration))s")
+            print("   - Files: \(fileCount), Directories: \(dirCount), Skipped: \(skippedCount)")
 
             return (files, gitignoreRules)
         }.value
