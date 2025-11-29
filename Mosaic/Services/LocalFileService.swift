@@ -11,21 +11,16 @@ class LocalFileService {
             var gitignoreRules = [".git/**"]
             let maxFiles = 50000  // 限制最大文件数，避免处理过大的目录
 
-            // 需要跳过的大型目录
+            // 需要跳过的大型目录（非隐藏）
             let skipDirectories: Set<String> = [
-                ".git",
                 "node_modules",
-                ".venv",
                 "venv",
                 "target",
                 "build",
                 "dist",
-                ".gradle",
-                ".idea",
                 "__pycache__",
                 "Pods",
                 "vendor",
-                ".next",
                 "out"
             ]
 
@@ -34,7 +29,7 @@ class LocalFileService {
                 let enumerator = FileManager.default.enumerator(
                     at: url,
                     includingPropertiesForKeys: keys,
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                    options: [.skipsPackageDescendants]  // 移除 skipsHiddenFiles，手动处理
                 )
             else {
                 return ([], gitignoreRules)
@@ -52,8 +47,16 @@ class LocalFileService {
                     break
                 }
 
-                // 立即检查并跳过大型依赖目录
                 let dirName = fileURL.lastPathComponent
+
+                // 跳过所有以 "." 开头的目录（包括 .git, .idea, .vscode 等）
+                if dirName.hasPrefix(".") {
+                    enumerator.skipDescendants()
+                    skippedCount += 1
+                    continue
+                }
+
+                // 跳过大型依赖目录
                 if skipDirectories.contains(dirName) {
                     enumerator.skipDescendants()
                     skippedCount += 1
