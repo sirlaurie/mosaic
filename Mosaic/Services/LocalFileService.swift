@@ -11,17 +11,53 @@ class LocalFileService {
             var gitignoreRules = [".git/**"]
             let maxFiles = 50000  // 限制最大文件数，避免处理过大的目录
 
-            // 需要跳过的大型目录（非隐藏）
+            // 需要跳过的大型目录
             let skipDirectories: Set<String> = [
+                // JavaScript/Node.js
                 "node_modules",
+                "bower_components",
+
+                // Python
                 "venv",
+                "env",
+                "__pycache__",
+                ".pytest_cache",
+                ".tox",
+                "site-packages",
+
+                // Java/Kotlin/Scala
                 "target",
                 "build",
-                "dist",
-                "__pycache__",
-                "Pods",
+                "out",
+                "classes",
+                "bin",
+
+                // Ruby
                 "vendor",
-                "out"
+                "bundle",
+
+                // iOS/macOS
+                "Pods",
+                "Carthage",
+                "DerivedData",
+
+                // .NET
+                "obj",
+                "packages",
+
+                // Go
+                "pkg",
+
+                // Rust
+                "debug",
+                "release",
+
+                // 通用构建输出
+                "dist",
+                "output",
+                "tmp",
+                "temp",
+                "cache"
             ]
 
             let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey, .isSymbolicLinkKey]
