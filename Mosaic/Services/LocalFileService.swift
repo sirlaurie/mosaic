@@ -2,70 +2,24 @@
 import Foundation
 
 class LocalFileService {
-    func scanDirectory(at url: URL) async -> (files: [FileData], gitignore: [String]) {
+    func scanDirectory(at url: URL, customLazyDirectories: [String] = []) async -> (files: [FileData], gitignore: [String]) {
         await Task.detached(priority: .userInitiated) {
             let startTime = Date()
             print("📂 [LocalFileService] Starting to scan directory: \(url.lastPathComponent)")
 
             var files: [FileData] = []
             var gitignoreRules = [".git/**"]
-            let maxFiles = 50000  // 限制最大文件数，避免处理过大的目录
+            // let maxFiles = 50000  // Removed limit to allow full scanning of large directories like Homebrew
 
-            // 需要跳过的大型目录
-            let skipDirectories: Set<String> = [
-                // JavaScript/Node.js
-                "node_modules",
-                "bower_components",
-
-                // Python
-                "venv",
-                "env",
-                "__pycache__",
-                ".pytest_cache",
-                ".tox",
-                "site-packages",
-
-                // Java/Kotlin/Scala
-                "target",
-                "build",
-                "out",
-                "classes",
-                "bin",
-
-                // Ruby
-                "vendor",
-                "bundle",
-
-                // iOS/macOS
-                "Pods",
-                "Carthage",
-                "DerivedData",
-
-                // .NET
-                "obj",
-                "packages",
-
-                // Go
-                "pkg",
-
-                // Rust
-                "debug",
-                "release",
-
-                // 通用构建输出
-                "dist",
-                "output",
-                "tmp",
-                "temp",
-                "cache"
-            ]
+            // Convert custom list to Set for fast lookup
+            let skipDirectories = Set(customLazyDirectories)
 
             let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey, .isSymbolicLinkKey]
             guard
                 let enumerator = FileManager.default.enumerator(
                     at: url,
                     includingPropertiesForKeys: keys,
-                    options: [.skipsPackageDescendants]  // 移除 skipsHiddenFiles，手动处理
+                    options: []  // 移除所有默认跳过选项，包括 skipsPackageDescendants
                 )
             else {
                 return ([], gitignoreRules)
@@ -77,23 +31,12 @@ class LocalFileService {
 
             // 单遍扫描：同时收集文件和 gitignore 规则
             while let fileURL = enumerator.nextObject() as? URL {
-                // 限制文件数量，避免内存溢出
-                if files.count >= maxFiles {
-                    print("⚠️ [LocalFileService] Reached maximum file limit (\(maxFiles)), stopping scan")
-                    break
-                }
-
+                // Removed maxFiles check
+                
                 let dirName = fileURL.lastPathComponent
 
-                // 跳过所有以 "." 开头的目录（包括 .git, .idea, .vscode 等）
-                if dirName.hasPrefix(".") {
-                    enumerator.skipDescendants()
-                    skippedCount += 1
-                    continue
-                }
-
-                // 跳过大型依赖目录
-                if skipDirectories.contains(dirName) {
+                // 只跳过 .git 目录，允许显示其他隐藏文件（如 .config, .github 等）
+                if dirName == ".git" {
                     enumerator.skipDescendants()
                     skippedCount += 1
                     continue
@@ -104,8 +47,28 @@ class LocalFileService {
                       let isDirectory = resourceValues.isDirectory
                 else { continue }
 
+                // 跳过大型依赖目录，但作为懒加载节点添加到列表中
+                if isDirectory && skipDirectories.contains(dirName) {
+                    enumerator.skipDescendants()
+                    skippedCount += 1
+                    
+                    // Add as lazy directory
+                    let relativePath = fileURL.path.replacingOccurrences(of: url.path, with: "")
+                    let cleanPath = relativePath.starts(with: "/") ? String(relativePath.dropFirst()) : relativePath
+                    let data = FileData(name: cleanPath, url: fileURL, isDirectory: true, isLazy: true)
+                    files.append(data)
+                    
+                    continue
+                }
+
                 if isDirectory {
                     dirCount += 1
+                    
+                    // Explicitly add the directory to files list so it shows up even if empty or files are ignored
+                    let relativePath = fileURL.path.replacingOccurrences(of: url.path, with: "")
+                    let cleanPath = relativePath.starts(with: "/") ? String(relativePath.dropFirst()) : relativePath
+                    let data = FileData(name: cleanPath, url: fileURL, isDirectory: true, isLazy: false)
+                    files.append(data)
                 } else {
                     fileCount += 1
                     // 收集文件
@@ -141,6 +104,60 @@ class LocalFileService {
             print("   - Files: \(fileCount), Directories: \(dirCount), Skipped: \(skippedCount)")
 
             return (files, gitignoreRules)
+        }.value
+    }
+    
+    func scanSubDirectory(at url: URL, rootURL: URL) async -> [FileData] {
+        await Task.detached(priority: .userInitiated) {
+            print("📂 [LocalFileService] Scanning subdirectory: \(url.lastPathComponent)")
+            var files: [FileData] = []
+            let keys: [URLResourceKey] = [.isDirectoryKey, .nameKey]
+            
+            // For subdirectories, we perform a shallow scan (or one level deep recursive? or fully recursive?)
+            // Usually "expand" means showing immediate children. But FileTreeView handles recursive structure.
+            // If we want to show the full tree inside `node_modules` when expanded, we should probably scan recursively
+            // BUT `node_modules` can be DEEP.
+            // Let's use the same logic as main scan, but without the "skipDirectories" check for the root itself.
+            
+            guard let enumerator = FileManager.default.enumerator(
+                at: url,
+                includingPropertiesForKeys: keys,
+                options: [.skipsPackageDescendants, .skipsHiddenFiles] // Skip hidden files in sub-scan for cleanliness
+            ) else {
+                return []
+            }
+            
+            let maxFiles = 10000
+            
+            while let fileURL = enumerator.nextObject() as? URL {
+                if files.count >= maxFiles { break }
+                
+                // Calculate path relative to the PROJECT ROOT, not the subdirectory
+                // This is crucial because FileNode structure relies on full relative paths
+                let relativePath = fileURL.path.replacingOccurrences(of: rootURL.path, with: "")
+                let cleanPath = relativePath.starts(with: "/") ? String(relativePath.dropFirst()) : relativePath
+                
+                let resourceValues = try? fileURL.resourceValues(forKeys: [.isDirectoryKey])
+                let isDirectory = resourceValues?.isDirectory ?? false
+                
+                // Simple filtering for subdirectory scan
+                // We might want to still skip nested node_modules to avoid infinite death
+                if fileURL.lastPathComponent == "node_modules" || fileURL.lastPathComponent.hasPrefix(".") {
+                    enumerator.skipDescendants()
+                    // We could add them as lazy nodes too if we want infinite recursion capability!
+                    // For now, let's just skip nested node_modules to keep it sane.
+                     if fileURL.lastPathComponent == "node_modules" {
+                        let data = FileData(name: cleanPath, url: fileURL, isDirectory: true, isLazy: true)
+                        files.append(data)
+                     }
+                    continue
+                }
+                
+                let data = FileData(name: cleanPath, url: fileURL, isDirectory: isDirectory)
+                files.append(data)
+            }
+            
+            return files
         }.value
     }
 

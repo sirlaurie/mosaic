@@ -19,6 +19,10 @@ struct UtilityPanelView: View {
             } else {
                 FileSelectionPanelView()
             }
+            
+            Spacer()
+            
+            SettingsButtonView()
         }
         .frame(width: 180)
         .background(Color.black.opacity(0.03))
@@ -60,7 +64,7 @@ struct InputPanelView: View {
                     .textFieldStyle(.plain)
                     .disableAutocorrection(true)
                     .onSubmit {
-                        mainViewModel.fetchGitHubRepository()
+                        fetchGitHubRepo()
                     }
             }
             .padding(.horizontal, 16)
@@ -77,7 +81,7 @@ struct InputPanelView: View {
             .padding(.horizontal, 16)
 
             Button(action: {
-                mainViewModel.fetchGitHubRepository()
+                fetchGitHubRepo()
             }) {
                 Text("Fetch")
                     .font(.system(size: 13, weight: .medium))
@@ -89,6 +93,11 @@ struct InputPanelView: View {
             Spacer()
         }
         .padding(.vertical, 20)
+    }
+    
+    private func fetchGitHubRepo() {
+        // Explicitly unwrap to avoid dynamic member lookup ambiguity
+        _mainViewModel.wrappedValue.fetchGitHubRepository()
     }
 }
 
@@ -115,5 +124,73 @@ struct FileSelectionPanelView: View {
             }
             .listStyle(.plain)
         }
+    }
+}
+
+struct SettingsButtonView: View {
+    @State private var isShowingSettings = false
+    
+    var body: some View {
+        Button(action: { isShowingSettings = true }) {
+            HStack {
+                Image(systemName: "gearshape")
+                Text("Settings")
+            }
+            .font(.system(size: 13))
+            .foregroundColor(.secondary)
+            .padding()
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $isShowingSettings) {
+            SettingsView()
+        }
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject var userPreferences = UserPreferences.shared
+    @State private var newDirectoryName = ""
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Ignored / Lazy Directories")
+                .font(.headline)
+            
+            Text("Directories added here will be loaded lazily (on expand).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            
+            HStack {
+                TextField("Directory Name (e.g. node_modules)", text: $newDirectoryName)
+                    .textFieldStyle(.roundedBorder)
+                
+                Button("Add") {
+                    if !newDirectoryName.isEmpty {
+                        userPreferences.addDirectory(newDirectoryName)
+                        newDirectoryName = ""
+                    }
+                }
+            }
+            
+            List {
+                ForEach(userPreferences.customLazyDirectories, id: \.self) { dir in
+                    HStack {
+                        Text(dir)
+                        Spacer()
+                        Button(action: {
+                            userPreferences.removeDirectory(dir)
+                        }) {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(height: 200)
+            .listStyle(.bordered(alternatesRowBackgrounds: true))
+        }
+        .padding()
+        .frame(width: 300)
     }
 }

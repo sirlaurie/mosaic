@@ -40,6 +40,7 @@ class MainViewModel: ObservableObject {
     private let localFileService: LocalFileService
     private let historyService: HistoryService
     private let formatterService: FormatterService
+    private let userPreferences = UserPreferences.shared
 
     init(
         gitHubAPIService: GitHubAPIService,
@@ -53,11 +54,11 @@ class MainViewModel: ObservableObject {
             localFileService: localFileService, gitHubAPIService: gitHubAPIService
         )
     }
-
+// ... (existing code) ...
     func fetchGitHubRepository() {
         Task {
-            isLoading = true
-            errorMessage = nil
+            self.isLoading = true
+            self.errorMessage = nil
             do {
                 let (owner, repo) = try parseGitHubURL(githubURL)
                 let tree = try await gitHubAPIService.fetchRepositoryTree(
@@ -72,23 +73,73 @@ class MainViewModel: ObservableObject {
             } catch {
                 self.errorMessage = error.localizedDescription
             }
-            isLoading = false
+            self.isLoading = false
         }
     }
 
     func selectLocalDirectory(url: URL) {
         Task {
-            isLoading = true
-            errorMessage = nil
+            self.isLoading = true
+            self.errorMessage = nil
 
-            let (files, gitignoreRules) = await localFileService.scanDirectory(at: url)
+            // 1. Scan files (IO Bound, already async)
+            let (files, gitignoreRules) = await localFileService.scanDirectory(at: url, customLazyDirectories: userPreferences.customLazyDirectories)
 
-            let filteredFiles = files.filter {
-                !isIgnored(filePath: $0.name, gitignoreRules: gitignoreRules)
-            }
+            // 2. Process files in background (CPU Bound)
+            let rootNodes = await Task.detached(priority: .userInitiated) {
+                // Define Matcher locally to ensure no MainActor isolation leakage
+                struct GitIgnoreMatcher {
+                    private let regexCache: [NSRegularExpression]
+                    
+                    init(rules: [String]) {
+                        self.regexCache = rules.compactMap { rule in
+                            var pattern = rule.trimmingCharacters(in: .whitespaces)
+                            guard !pattern.isEmpty, !pattern.hasPrefix("#") else { return nil }
+                            
+                            let isAnchored = pattern.hasPrefix("/")
+                            if isAnchored { pattern = String(pattern.dropFirst()) }
+                            
+                            let isDirectory = pattern.hasSuffix("/")
+                            if isDirectory { pattern = String(pattern.dropLast()) }
+                            
+                            pattern = pattern
+                                .replacingOccurrences(of: ".", with: "\\.")
+                                .replacingOccurrences(of: "*", with: "[^/]*")
+                                .replacingOccurrences(of: "?", with: ".")
+                            
+                            if !isAnchored { pattern = "(^|/)" + pattern }
+                            else { pattern = "^" + pattern }
+                            
+                            if isDirectory { pattern += "(/.*)?$" }
+                            else { pattern += "$" }
+                            
+                            return try? NSRegularExpression(pattern: pattern)
+                        }
+                    }
+                    
+                    func matches(filePath: String) -> Bool {
+                        let range = NSRange(location: 0, length: filePath.utf16.count)
+                        return regexCache.contains { regex in
+                            regex.firstMatch(in: filePath, options: [], range: range) != nil
+                        }
+                    }
+                }
+                
+                // Initialize matcher with pre-compiled regexes
+                // let matcher = GitIgnoreMatcher(rules: gitignoreRules)
+                
+                // Filter files
+                // User requested NO filtering by default.
+                // .gitignore rules are ignored. Only manually "lazy" directories (handled in scanDirectory) are treated specially.
+                let filteredFiles = files
+                
+                // Build intermediate tree structure
+                return self.buildIntermediateTree(from: filteredFiles, rootURL: url)
+            }.value
 
-            self.fileTree = buildFileTree(from: filteredFiles, rootURL: url)
-
+            // 3. Update UI on Main Thread
+            self.fileTree = self.convertIntermediateToVM(nodes: rootNodes)
+            
             do {
                 try await historyService.addHistoryItem(url: url, type: .local)
                 NotificationCenter.default.post(name: .didUpdateHistory, object: nil)
@@ -96,8 +147,197 @@ class MainViewModel: ObservableObject {
                 self.errorMessage = error.localizedDescription
             }
 
-            isLoading = false
+            self.isLoading = false
         }
+    }
+    
+    // MARK: - Background Tree Building Helpers
+    
+    private struct IntermediateFileNode {
+        let data: FileData
+        var children: [IntermediateFileNode]
+    }
+    
+    nonisolated private func buildIntermediateTree(from files: [FileData], rootURL: URL) -> [IntermediateFileNode] {
+        let rootName = rootURL.lastPathComponent
+        let rootData = FileData(name: rootName, url: rootURL, isDirectory: true)
+        
+        // Use a class for reference semantics during build, then convert to struct or just use it
+        // Actually, using a temporary class is easier for the map logic
+        class TempNode {
+            let data: FileData
+            var children: [TempNode] = []
+            init(data: FileData) { self.data = data }
+        }
+        
+        let root = TempNode(data: rootData)
+        var nodeMap: [String: TempNode] = ["": root]
+        
+        let sortedFiles = files.sorted(by: { $0.name < $1.name })
+        
+        for file in sortedFiles {
+            let pathComponents = file.name.split(separator: "/").map(String.init)
+            var currentPath = ""
+            
+            // Ensure parent directories exist
+            for i in 0..<(pathComponents.count - 1) {
+                let component = pathComponents[i]
+                let parentPath = currentPath
+                currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
+                
+                if nodeMap[currentPath] == nil {
+                    let dirData = FileData(
+                        name: currentPath, url: URL(fileURLWithPath: currentPath), isDirectory: true
+                    )
+                    let newNode = TempNode(data: dirData)
+                    nodeMap[currentPath] = newNode
+                    nodeMap[parentPath]?.children.append(newNode)
+                }
+            }
+            
+            let fileNode = TempNode(data: file)
+            let parentPath = pathComponents.dropLast().joined(separator: "/")
+            
+            if let parent = nodeMap[parentPath] {
+                parent.children.append(fileNode)
+            }
+            
+            if file.isDirectory {
+                nodeMap[file.name] = fileNode
+            }
+        }
+        
+        // Recursive convert TempNode to IntermediateFileNode and sort children
+        func convert(_ node: TempNode) -> IntermediateFileNode {
+            let sortedChildren = node.children
+                .sorted { $0.data.name < $1.data.name }
+                .map { convert($0) }
+            return IntermediateFileNode(data: node.data, children: sortedChildren)
+        }
+        
+        return [convert(root)]
+    }
+    
+    private func convertIntermediateToVM(nodes: [IntermediateFileNode], parent: FileNode? = nil) -> [FileNode] {
+        return nodes.map { nodeData in
+            let hasLoadedChildren = !nodeData.data.isLazy
+            let node = FileNode(
+                data: nodeData.data,
+                children: [], // will fill recursively
+                parent: parent,
+                hasLoadedChildren: hasLoadedChildren
+            )
+            
+            if nodeData.data.isLazy {
+                 node.onExpand = { [weak self] n in self?.handleNodeExpansion(n) }
+            }
+            
+            node.children = convertIntermediateToVM(nodes: nodeData.children, parent: node)
+            
+            if parent == nil {
+                node.isExpanded = true // Expand root
+            }
+            
+            return node
+        }
+    }
+    
+    private func handleNodeExpansion(_ node: FileNode) {
+        print("🔄 Lazy loading node: \(node.data.name)")
+        guard let rootURL = rootDirectoryURL else { return }
+        
+        Task {
+            await MainActor.run { self.isLoading = true }
+            
+            let subFiles = await localFileService.scanSubDirectory(at: node.data.url, rootURL: rootURL)
+            
+            await MainActor.run {
+                let nodes = self.buildSubTree(from: subFiles, parentNode: node)
+                node.children = nodes
+                node.hasLoadedChildren = true
+                self.isLoading = false
+            }
+        }
+    }
+    
+    // Helper to build subtree for lazy loading
+    private func buildSubTree(from files: [FileData], parentNode: FileNode) -> [FileNode] {
+        // This is similar to buildFileTree but we need to attach it to the parent
+        // files contain paths relative to ROOT, so we need to reconstruct the structure under parentNode
+        
+        // Since 'files' list comes from scanSubDirectory, it contains relative paths from ROOT.
+        // E.g. parent is "node_modules", file is "node_modules/foo.js".
+        
+        // We can reuse the logic from buildFileTree but focusing on the children of parentNode.
+        // However, buildFileTree builds from scratch.
+        
+        // Simpler approach for subtree:
+        // The files list is flat. We need to turn it into a tree.
+        // The parent node is the root of THIS subtree.
+        
+        var nodeMap: [String: FileNode] = [parentNode.data.name: parentNode]
+        
+        for file in files.sorted(by: { $0.name < $1.name }) {
+            let pathComponents = file.name.split(separator: "/").map(String.init)
+            var currentPath = ""
+            
+            // We need to find where this file attaches to.
+            // Since file.name starts with parentNode.data.name (e.g. node_modules/...),
+            // we traverse down.
+            
+            for i in 0..<(pathComponents.count - 1) {
+                let component = pathComponents[i]
+                let parentPath = currentPath
+                currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
+                
+                if nodeMap[currentPath] == nil {
+                    // Create directory node
+                    // Note: Check if this is the parentNode itself?
+                    if currentPath == parentNode.data.name {
+                        // Should be in map already
+                        continue
+                    }
+                    
+                    let dirData = FileData(
+                        name: currentPath,
+                        url: rootDirectoryURL!.appendingPathComponent(currentPath),
+                        isDirectory: true,
+                        isLazy: false // Sub-directories are not lazy by default unless specifically handled?
+                    )
+                    // Attach handler just in case
+                    let newNode = FileNode(data: dirData, hasLoadedChildren: true)
+                    newNode.onExpand = { [weak self] n in self?.handleNodeExpansion(n) }
+                    
+                    nodeMap[currentPath] = newNode
+                    
+                    // Attach to parent
+                    if let parent = nodeMap[parentPath] {
+                        parent.children.append(newNode)
+                        newNode.parent = parent
+                    }
+                }
+            }
+            
+            // Create the file/leaf node
+            let fileNode = FileNode(data: file, hasLoadedChildren: !file.isLazy)
+            if file.isLazy {
+                 fileNode.onExpand = { [weak self] n in self?.handleNodeExpansion(n) }
+            }
+            
+            let parentPath = pathComponents.dropLast().joined(separator: "/")
+            
+            if let parent = nodeMap[parentPath] {
+                parent.children.append(fileNode)
+                fileNode.parent = parent
+            }
+        }
+        
+        // Sort children of all affected nodes
+        for (_, node) in nodeMap {
+             node.children.sort { $0.data.name < $1.data.name }
+        }
+        
+        return parentNode.children
     }
 
     func openPanel() {
@@ -211,100 +451,6 @@ class MainViewModel: ObservableObject {
                 self.isLoading = false
             }
         }
-    }
-
-    private func isIgnored(filePath: String, gitignoreRules: [String]) -> Bool {
-        gitignoreRules.contains(where: { rule in
-            var pattern = rule.trimmingCharacters(in: .whitespaces)
-
-            guard !pattern.isEmpty, !pattern.hasPrefix("#") else { return false }
-
-            let isAnchored = pattern.hasPrefix("/")
-
-            if isAnchored {
-                pattern = String(pattern.dropFirst())
-            }
-
-            let isDirectory = pattern.hasSuffix("/")
-
-            if isDirectory {
-                pattern = String(pattern.dropLast())
-            }
-
-            pattern =
-                pattern
-
-                .replacingOccurrences(of: ".", with: "\\.")
-                .replacingOccurrences(of: "*", with: "[^/]*")
-                .replacingOccurrences(of: "?", with: ".")
-
-            if !isAnchored {
-                pattern = "(^|/)" + pattern
-
-            } else {
-                pattern = "^" + pattern
-            }
-
-            if isDirectory {
-                pattern += "(/.*)?$"
-
-            } else {
-                pattern += "$"
-            }
-
-            if let regex = try? NSRegularExpression(pattern: pattern) {
-                let range = NSRange(location: 0, length: filePath.utf16.count)
-
-                return regex.firstMatch(in: filePath, options: [], range: range) != nil
-            }
-
-            return false
-
-        })
-    }
-
-    private func buildFileTree(from files: [FileData], rootURL: URL) -> [FileNode] {
-        // Create the root directory node with the actual directory name
-        let rootName = rootURL.lastPathComponent
-        let rootData = FileData(name: rootName, url: rootURL, isDirectory: true)
-        let root = FileNode(data: rootData)
-        var nodeMap: [String: FileNode] = ["": root]
-
-        for file in files.sorted(by: { $0.name < $1.name }) {
-            let pathComponents = file.name.split(separator: "/").map(String.init)
-            var currentPath = ""
-
-            for i in 0..<(pathComponents.count - 1) {
-                let component = pathComponents[i]
-                let parentPath = currentPath
-                currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
-
-                if nodeMap[currentPath] == nil {
-                    let dirData = FileData(
-                        name: component, url: URL(fileURLWithPath: currentPath), isDirectory: true
-                    )
-                    let newNode = FileNode(data: dirData)
-                    nodeMap[currentPath] = newNode
-                    nodeMap[parentPath]?.children.append(newNode)
-                    newNode.parent = nodeMap[parentPath]
-                }
-            }
-
-            let fileNode = FileNode(data: file)
-            let parentPath = pathComponents.dropLast().joined(separator: "/")
-            nodeMap[parentPath]?.children.append(fileNode)
-            fileNode.parent = nodeMap[parentPath]
-        }
-
-        for (_, node) in nodeMap {
-            node.children.sort { $0.data.name < $1.data.name }
-        }
-
-        // Expand the root node so user can see the first level
-        root.isExpanded = true
-
-        // Return array containing the root directory node
-        return [root]
     }
 
     private func parseGitHubURL(_ urlString: String) throws -> (owner: String, repo: String) {
