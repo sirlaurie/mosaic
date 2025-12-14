@@ -11,11 +11,6 @@ struct CustomOutputView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
     var body: some View {
-        let _ = {
-            let timestamp = Date().timeIntervalSince1970
-            print("📄 [\(timestamp)] CustomOutputView: body evaluated")
-            print("   - outputText.count: \(mainViewModel.outputText.count)")
-        }()
         VStack(spacing: 0) {
             if mainViewModel.outputText.isEmpty {
                 EmptyOutputView()

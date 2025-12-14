@@ -19,9 +19,9 @@ struct UtilityPanelView: View {
             } else {
                 FileSelectionPanelView()
             }
-            
+
             Spacer()
-            
+
             SettingsButtonView()
         }
         .frame(width: 180)
@@ -94,7 +94,7 @@ struct InputPanelView: View {
         }
         .padding(.vertical, 20)
     }
-    
+
     private func fetchGitHubRepo() {
         // Explicitly unwrap to avoid dynamic member lookup ambiguity
         _mainViewModel.wrappedValue.fetchGitHubRepository()
@@ -111,8 +111,7 @@ struct FileSelectionPanelView: View {
                     .font(.headline)
                 Spacer()
                 Button("Clear") {
-                    mainViewModel.fileTree = []
-                    mainViewModel.outputText = ""
+                    mainViewModel.clearWorkspace()
                 }
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
@@ -120,7 +119,7 @@ struct FileSelectionPanelView: View {
             .padding([.horizontal, .top])
 
             List(mainViewModel.fileTree) { rootNode in
-                FileTreeView(node: rootNode, level: 0)
+                FileTreeView(node: rootNode, level: 0, query: "", visibleNodeIDs: nil)
             }
             .listStyle(.plain)
         }
@@ -129,7 +128,7 @@ struct FileSelectionPanelView: View {
 
 struct SettingsButtonView: View {
     @State private var isShowingSettings = false
-    
+
     var body: some View {
         Button(action: { isShowingSettings = true }) {
             HStack {
@@ -150,35 +149,35 @@ struct SettingsButtonView: View {
 struct SettingsView: View {
     @ObservedObject var userPreferences = UserPreferences.shared
     @State private var newDirectoryName = ""
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Ignored / Lazy Directories")
                 .font(.headline)
-            
+
             Text("Directories added here will be loaded lazily (on expand).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            
+
             HStack {
                 TextField("Directory Name (e.g. node_modules)", text: $newDirectoryName)
                     .textFieldStyle(.roundedBorder)
-                
+
                 Button("Add") {
                     if !newDirectoryName.isEmpty {
-                        userPreferences.addDirectory(newDirectoryName)
+                        userPreferences.addLazyDirectory(newDirectoryName)
                         newDirectoryName = ""
                     }
                 }
             }
-            
+
             List {
                 ForEach(userPreferences.customLazyDirectories, id: \.self) { dir in
                     HStack {
                         Text(dir)
                         Spacer()
                         Button(action: {
-                            userPreferences.removeDirectory(dir)
+                            userPreferences.removeLazyDirectory(dir)
                         }) {
                             Image(systemName: "trash")
                                 .foregroundColor(.red)

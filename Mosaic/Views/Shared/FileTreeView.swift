@@ -9,8 +9,13 @@ import SwiftUI
 struct FileTreeView: View {
     @ObservedObject var node: FileNode
     let level: Int
+    let query: String
+    let visibleNodeIDs: Set<UUID>?
 
     var body: some View {
+        let isSearching = !query.isEmpty
+        let expandedForDisplay = isSearching ? true : node.isExpanded
+
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 Rectangle()
@@ -20,13 +25,14 @@ struct FileTreeView: View {
                 // Expand/collapse button with larger hit area
                 if node.data.isDirectory {
                     Button(action: { node.isExpanded.toggle() }) {
-                        Image(systemName: node.isExpanded ? "chevron.down" : "chevron.right")
+                        Image(systemName: expandedForDisplay ? "chevron.down" : "chevron.right")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.secondary)
                             .frame(width: 24, height: 24)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .disabled(isSearching)
                 } else {
                     Rectangle()
                         .fill(.clear)
@@ -61,10 +67,19 @@ struct FileTreeView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
 
-            if node.data.isDirectory, node.isExpanded {
+            if node.data.isDirectory, expandedForDisplay {
                 let sortedChildren = getSortedChildren()
-                ForEach(sortedChildren, id: \.id) { childNode in
-                    FileTreeView(node: childNode, level: level + 1)
+                let visibleChildren = sortedChildren.filter { child in
+                    visibleNodeIDs?.contains(child.id) ?? true
+                }
+
+                ForEach(visibleChildren, id: \.id) { childNode in
+                    FileTreeView(
+                        node: childNode,
+                        level: level + 1,
+                        query: query,
+                        visibleNodeIDs: visibleNodeIDs
+                    )
                 }
             }
         }

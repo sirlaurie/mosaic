@@ -11,12 +11,6 @@ struct FileTreeContainerView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
 
     var body: some View {
-        let _ = {
-            let timestamp = Date().timeIntervalSince1970
-            print("🌲 [\(timestamp)] FileTreeContainerView: body evaluated")
-            print("   - fileTree.count: \(mainViewModel.fileTree.count)")
-            print("   - Thread: \(Thread.isMainThread ? "Main" : "Background")")
-        }()
         VStack(spacing: 8) {
             HStack {
                 Text("Selected Files")
@@ -25,8 +19,7 @@ struct FileTreeContainerView: View {
                 Spacer()
 
                 Button("Clear") {
-                    mainViewModel.fileTree = []
-                    mainViewModel.outputText = ""
+                    mainViewModel.clearWorkspace()
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
@@ -39,8 +32,28 @@ struct FileTreeContainerView: View {
 
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(mainViewModel.fileTree) { rootNode in
-                        FileTreeView(node: rootNode, level: 0)
+                    let visibleIDs = mainViewModel.visibleFileNodeIDs
+                    let query = mainViewModel.fileSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let roots = mainViewModel.fileTree.filter { node in
+                        visibleIDs?.contains(node.id) ?? true
+                    }
+
+                    if !query.isEmpty, roots.isEmpty {
+                        Text("No matches")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                    } else {
+                        ForEach(roots) { rootNode in
+                            FileTreeView(
+                                node: rootNode,
+                                level: 0,
+                                query: query,
+                                visibleNodeIDs: visibleIDs
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, 8)

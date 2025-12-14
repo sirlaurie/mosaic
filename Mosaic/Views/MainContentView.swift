@@ -94,8 +94,7 @@ struct FileTreeHeaderView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Clear") {
-                mainViewModel.fileTree = []
-                mainViewModel.outputText = ""
+                mainViewModel.clearWorkspace()
             }
             .font(.system(size: 13))
             .foregroundStyle(.secondary)

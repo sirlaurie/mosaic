@@ -10,15 +10,9 @@ import Foundation
 import UniformTypeIdentifiers
 
 @MainActor
-class MainViewModel: ObservableObject {
+final class MainViewModel: ObservableObject {
     @Published var fileTree: [FileNode] = [] {
-        didSet {
-            let timestamp = Date().timeIntervalSince1970
-            print("🌳 [\(timestamp)] MainViewModel: fileTree changed")
-            print("   - Old count: \(oldValue.count), New count: \(fileTree.count)")
-            print("   - isEmpty: \(fileTree.isEmpty)")
-            print("   - Thread: \(Thread.isMainThread ? "Main" : "Background")")
-        }
+        didSet { scheduleSearchVisibilityUpdate() }
     }
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
@@ -30,10 +24,14 @@ class MainViewModel: ObservableObject {
     @Published var outputText: String = ""
     @Published var isShowingFileExporter = false
 
+    @Published var fileSearchQuery: String = "" {
+        didSet { scheduleSearchVisibilityUpdate() }
+    }
+    @Published private(set) var visibleFileNodeIDs: Set<UUID>? = nil
+
     private var rootDirectoryURL: URL?
     nonisolated(unsafe) private var securityScopedURL: URL?  // 持有security-scoped resource，使用 nonisolated(unsafe) 以便在 deinit 中访问
 
-    @Published var selectedTab: Int = 0
     @Published var currentTabType: TabType = .local
 
     private let gitHubAPIService: GitHubAPIService
@@ -41,6 +39,11 @@ class MainViewModel: ObservableObject {
     private let historyService: HistoryService
     private let formatterService: FormatterService
     private let userPreferences = UserPreferences.shared
+
+    private var loadTask: Task<Void, Never>?
+    private var fetchTask: Task<Void, Never>?
+    private var generateTask: Task<Void, Never>?
+    private var searchVisibilityTask: Task<Void, Never>?
 
     init(
         gitHubAPIService: GitHubAPIService,
@@ -54,114 +57,202 @@ class MainViewModel: ObservableObject {
             localFileService: localFileService, gitHubAPIService: gitHubAPIService
         )
     }
-// ... (existing code) ...
-    func fetchGitHubRepository() {
-        Task {
-            self.isLoading = true
-            self.errorMessage = nil
-            do {
-                let (owner, repo) = try parseGitHubURL(githubURL)
-                let tree = try await gitHubAPIService.fetchRepositoryTree(
-                    owner: owner, repo: repo, token: githubToken
-                )
-                self.fileTree = tree
 
-                rootDirectoryURL = URL(string: "https://github.com/\(owner)/\(repo)")!
+    func clearWorkspace() {
+        loadTask?.cancel()
+        fetchTask?.cancel()
+        generateTask?.cancel()
+        searchVisibilityTask?.cancel()
 
-                try await historyService.addHistoryItem(path: githubURL, type: .github)
-                NotificationCenter.default.post(name: .didUpdateHistory, object: nil)
-            } catch {
-                self.errorMessage = error.localizedDescription
+        stopAccessingSecurityScopedResource()
+        rootDirectoryURL = nil
+
+        isLoading = false
+        errorMessage = nil
+        fileSearchQuery = ""
+        fileTree = []
+        outputText = ""
+    }
+
+    /// User-initiated source switching from the toolbar picker.
+    /// We defer cleanup to the next runloop to avoid "Publishing changes from within view updates" warnings.
+    func userDidSelectSource(_ newValue: TabType) {
+        guard currentTabType != newValue else { return }
+        currentTabType = newValue
+        clearWorkspace()
+    }
+
+    private func scheduleSearchVisibilityUpdate() {
+        searchVisibilityTask?.cancel()
+        searchVisibilityTask = Task { @MainActor in
+            // Avoid publishing derived state during a view update cycle.
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async { continuation.resume() }
             }
-            self.isLoading = false
+            if Task.isCancelled { return }
+            self.updateSearchVisibility()
+        }
+    }
+
+    private func updateSearchVisibility() {
+        let query = fileSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else {
+            visibleFileNodeIDs = nil
+            return
+        }
+
+        var visible: Set<UUID> = []
+
+        func markAncestorsVisible(_ node: FileNode) {
+            var current = node.parent
+            while let parent = current {
+                visible.insert(parent.id)
+                current = parent.parent
+            }
+        }
+
+        func walk(_ node: FileNode, inheritedVisible: Bool) {
+            let name = node.data.name.lowercased()
+            let matchesSelf = name.contains(query)
+            let directoryMatches = matchesSelf && node.data.isDirectory
+            let shouldShow = inheritedVisible || matchesSelf
+
+            if shouldShow { visible.insert(node.id) }
+            if matchesSelf { markAncestorsVisible(node) }
+
+            let nextInherited = inheritedVisible || directoryMatches
+            for child in node.children {
+                walk(child, inheritedVisible: nextInherited)
+            }
+        }
+
+        for root in fileTree {
+            walk(root, inheritedVisible: false)
+        }
+
+        visibleFileNodeIDs = visible
+    }
+    func fetchGitHubRepository() {
+        fetchTask?.cancel()
+        loadTask?.cancel()
+        generateTask?.cancel()
+
+        isLoading = true
+        errorMessage = nil
+        fileSearchQuery = ""
+
+        let inputURL = githubURL
+        let token = githubToken
+
+        let (owner, repo): (String, String)
+        do {
+            (owner, repo) = try parseGitHubURL(inputURL)
+        } catch {
+            errorMessage = error.localizedDescription
+            isLoading = false
+            return
+        }
+
+        let ignoreMatcher = IgnoreMatcher(patterns: userPreferences.ignoredNamePatterns)
+        let repoHTMLURL = URL(string: "https://github.com/\(owner)/\(repo)")!
+
+        fetchTask = Task { @MainActor in
+            do {
+                let (_, items) = try await gitHubAPIService.fetchRepositoryFileData(
+                    owner: owner,
+                    repo: repo,
+                    token: token,
+                    ignoreMatcher: ignoreMatcher
+                )
+
+                guard !Task.isCancelled else {
+                    isLoading = false
+                    return
+                }
+
+                let rootNodes = await MainViewModel.buildIntermediateTree(from: items, rootURL: repoHTMLURL)
+
+                guard !Task.isCancelled else {
+                    isLoading = false
+                    return
+                }
+
+                rootDirectoryURL = repoHTMLURL
+                fileTree = convertIntermediateToVM(nodes: rootNodes)
+                isLoading = false
+
+                do {
+                    try await historyService.addHistoryItem(path: inputURL, type: .github)
+                NotificationCenter.default.post(name: .didUpdateHistory, object: nil)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+                isLoading = false
+            }
         }
     }
 
     func selectLocalDirectory(url: URL) {
-        Task {
-            self.isLoading = true
-            self.errorMessage = nil
+        loadTask?.cancel()
+        generateTask?.cancel()
 
-            // 1. Scan files (IO Bound, already async)
-            let (files, gitignoreRules) = await localFileService.scanDirectory(at: url, customLazyDirectories: userPreferences.customLazyDirectories)
+        isLoading = true
+        errorMessage = nil
+        fileSearchQuery = ""
 
-            // 2. Process files in background (CPU Bound)
-            let rootNodes = await Task.detached(priority: .userInitiated) {
-                // Define Matcher locally to ensure no MainActor isolation leakage
-                struct GitIgnoreMatcher {
-                    private let regexCache: [NSRegularExpression]
-                    
-                    init(rules: [String]) {
-                        self.regexCache = rules.compactMap { rule in
-                            var pattern = rule.trimmingCharacters(in: .whitespaces)
-                            guard !pattern.isEmpty, !pattern.hasPrefix("#") else { return nil }
-                            
-                            let isAnchored = pattern.hasPrefix("/")
-                            if isAnchored { pattern = String(pattern.dropFirst()) }
-                            
-                            let isDirectory = pattern.hasSuffix("/")
-                            if isDirectory { pattern = String(pattern.dropLast()) }
-                            
-                            pattern = pattern
-                                .replacingOccurrences(of: ".", with: "\\.")
-                                .replacingOccurrences(of: "*", with: "[^/]*")
-                                .replacingOccurrences(of: "?", with: ".")
-                            
-                            if !isAnchored { pattern = "(^|/)" + pattern }
-                            else { pattern = "^" + pattern }
-                            
-                            if isDirectory { pattern += "(/.*)?$" }
-                            else { pattern += "$" }
-                            
-                            return try? NSRegularExpression(pattern: pattern)
-                        }
-                    }
-                    
-                    func matches(filePath: String) -> Bool {
-                        let range = NSRange(location: 0, length: filePath.utf16.count)
-                        return regexCache.contains { regex in
-                            regex.firstMatch(in: filePath, options: [], range: range) != nil
-                        }
-                    }
-                }
-                
-                // Initialize matcher with pre-compiled regexes
-                // let matcher = GitIgnoreMatcher(rules: gitignoreRules)
-                
-                // Filter files
-                // User requested NO filtering by default.
-                // .gitignore rules are ignored. Only manually "lazy" directories (handled in scanDirectory) are treated specially.
-                let filteredFiles = files
-                
-                // Build intermediate tree structure
-                return self.buildIntermediateTree(from: filteredFiles, rootURL: url)
-            }.value
+        let lazyDirectories = userPreferences.customLazyDirectories
+        let ignoreMatcher = IgnoreMatcher(patterns: userPreferences.ignoredNamePatterns)
+        let includeHiddenFiles = userPreferences.includeHiddenFiles
+        let includePackageContents = userPreferences.includePackageContents
 
-            // 3. Update UI on Main Thread
-            self.fileTree = self.convertIntermediateToVM(nodes: rootNodes)
-            
+        loadTask = Task { @MainActor in
+            let (files, _) = await localFileService.scanDirectory(
+                at: url,
+                customLazyDirectories: lazyDirectories,
+                ignoreMatcher: ignoreMatcher,
+                includeHiddenFiles: includeHiddenFiles,
+                includePackageContents: includePackageContents
+            )
+
+            guard !Task.isCancelled else {
+                isLoading = false
+                return
+            }
+
+            let rootNodes = await MainViewModel.buildIntermediateTree(from: files, rootURL: url)
+
+            guard !Task.isCancelled else {
+                isLoading = false
+                return
+            }
+
+            fileTree = convertIntermediateToVM(nodes: rootNodes)
+            rootDirectoryURL = url
+            isLoading = false
+
             do {
                 try await historyService.addHistoryItem(url: url, type: .local)
                 NotificationCenter.default.post(name: .didUpdateHistory, object: nil)
             } catch {
-                self.errorMessage = error.localizedDescription
+                errorMessage = error.localizedDescription
             }
-
-            self.isLoading = false
         }
     }
-    
+
     // MARK: - Background Tree Building Helpers
-    
+
     private struct IntermediateFileNode {
         let data: FileData
         var children: [IntermediateFileNode]
     }
-    
-    nonisolated private func buildIntermediateTree(from files: [FileData], rootURL: URL) -> [IntermediateFileNode] {
+
+    @concurrent
+    nonisolated private static func buildIntermediateTree(from files: [FileData], rootURL: URL) async -> [IntermediateFileNode] {
         let rootName = rootURL.lastPathComponent
         let rootData = FileData(name: rootName, url: rootURL, isDirectory: true)
-        
+
         // Use a class for reference semantics during build, then convert to struct or just use it
         // Actually, using a temporary class is easier for the map logic
         class TempNode {
@@ -169,44 +260,44 @@ class MainViewModel: ObservableObject {
             var children: [TempNode] = []
             init(data: FileData) { self.data = data }
         }
-        
+
         let root = TempNode(data: rootData)
         var nodeMap: [String: TempNode] = ["": root]
-        
+
         let sortedFiles = files.sorted(by: { $0.name < $1.name })
-        
+
         for file in sortedFiles {
             let pathComponents = file.name.split(separator: "/").map(String.init)
             var currentPath = ""
-            
+
             // Ensure parent directories exist
             for i in 0..<(pathComponents.count - 1) {
                 let component = pathComponents[i]
                 let parentPath = currentPath
                 currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
-                
+
                 if nodeMap[currentPath] == nil {
                     let dirData = FileData(
-                        name: currentPath, url: URL(fileURLWithPath: currentPath), isDirectory: true
+                        name: currentPath, url: rootURL.appendingPathComponent(currentPath), isDirectory: true
                     )
                     let newNode = TempNode(data: dirData)
                     nodeMap[currentPath] = newNode
                     nodeMap[parentPath]?.children.append(newNode)
                 }
             }
-            
+
             let fileNode = TempNode(data: file)
             let parentPath = pathComponents.dropLast().joined(separator: "/")
-            
+
             if let parent = nodeMap[parentPath] {
                 parent.children.append(fileNode)
             }
-            
+
             if file.isDirectory {
                 nodeMap[file.name] = fileNode
             }
         }
-        
+
         // Recursive convert TempNode to IntermediateFileNode and sort children
         func convert(_ node: TempNode) -> IntermediateFileNode {
             let sortedChildren = node.children
@@ -214,10 +305,10 @@ class MainViewModel: ObservableObject {
                 .map { convert($0) }
             return IntermediateFileNode(data: node.data, children: sortedChildren)
         }
-        
+
         return [convert(root)]
     }
-    
+
     private func convertIntermediateToVM(nodes: [IntermediateFileNode], parent: FileNode? = nil) -> [FileNode] {
         return nodes.map { nodeData in
             let hasLoadedChildren = !nodeData.data.isLazy
@@ -227,69 +318,99 @@ class MainViewModel: ObservableObject {
                 parent: parent,
                 hasLoadedChildren: hasLoadedChildren
             )
-            
+
             if nodeData.data.isLazy {
                  node.onExpand = { [weak self] n in self?.handleNodeExpansion(n) }
             }
-            
+
             node.children = convertIntermediateToVM(nodes: nodeData.children, parent: node)
-            
+
             if parent == nil {
                 node.isExpanded = true // Expand root
             }
-            
+
             return node
         }
     }
-    
+
     private func handleNodeExpansion(_ node: FileNode) {
-        print("🔄 Lazy loading node: \(node.data.name)")
         guard let rootURL = rootDirectoryURL else { return }
-        
-        Task {
-            await MainActor.run { self.isLoading = true }
-            
-            let subFiles = await localFileService.scanSubDirectory(at: node.data.url, rootURL: rootURL)
-            
-            await MainActor.run {
-                let nodes = self.buildSubTree(from: subFiles, parentNode: node)
-                node.children = nodes
-                node.hasLoadedChildren = true
-                self.isLoading = false
+
+        isLoading = true
+
+        let nodeID = node.id
+        let nodeURL = node.data.url
+
+        let lazyDirectories = userPreferences.customLazyDirectories
+        let ignoreMatcher = IgnoreMatcher(patterns: userPreferences.ignoredNamePatterns)
+        let includeHiddenFiles = userPreferences.includeHiddenFiles
+        let includePackageContents = userPreferences.includePackageContents
+
+        Task { @MainActor in
+            let subFiles = await localFileService.scanSubDirectory(
+                at: nodeURL,
+                rootURL: rootURL,
+                customLazyDirectories: lazyDirectories,
+                ignoreMatcher: ignoreMatcher,
+                includeHiddenFiles: includeHiddenFiles,
+                includePackageContents: includePackageContents
+            )
+
+            guard !Task.isCancelled else {
+                isLoading = false
+                return
             }
+
+            guard let parentNode = findNode(with: nodeID, in: fileTree) else {
+                isLoading = false
+                return
+            }
+
+            let nodes = buildSubTree(from: subFiles, parentNode: parentNode)
+            parentNode.children = nodes
+            parentNode.hasLoadedChildren = true
+            isLoading = false
         }
     }
-    
+
+    private func findNode(with id: UUID, in nodes: [FileNode]) -> FileNode? {
+        for node in nodes {
+            if node.id == id { return node }
+            if let found = findNode(with: id, in: node.children) { return found }
+        }
+        return nil
+    }
+
     // Helper to build subtree for lazy loading
     private func buildSubTree(from files: [FileData], parentNode: FileNode) -> [FileNode] {
         // This is similar to buildFileTree but we need to attach it to the parent
         // files contain paths relative to ROOT, so we need to reconstruct the structure under parentNode
-        
+
         // Since 'files' list comes from scanSubDirectory, it contains relative paths from ROOT.
         // E.g. parent is "node_modules", file is "node_modules/foo.js".
-        
+
         // We can reuse the logic from buildFileTree but focusing on the children of parentNode.
         // However, buildFileTree builds from scratch.
-        
+
         // Simpler approach for subtree:
         // The files list is flat. We need to turn it into a tree.
         // The parent node is the root of THIS subtree.
-        
+
         var nodeMap: [String: FileNode] = [parentNode.data.name: parentNode]
-        
+
         for file in files.sorted(by: { $0.name < $1.name }) {
             let pathComponents = file.name.split(separator: "/").map(String.init)
             var currentPath = ""
-            
+
             // We need to find where this file attaches to.
             // Since file.name starts with parentNode.data.name (e.g. node_modules/...),
             // we traverse down.
-            
+
             for i in 0..<(pathComponents.count - 1) {
                 let component = pathComponents[i]
                 let parentPath = currentPath
                 currentPath = currentPath.isEmpty ? component : "\(currentPath)/\(component)"
-                
+
                 if nodeMap[currentPath] == nil {
                     // Create directory node
                     // Note: Check if this is the parentNode itself?
@@ -297,7 +418,7 @@ class MainViewModel: ObservableObject {
                         // Should be in map already
                         continue
                     }
-                    
+
                     let dirData = FileData(
                         name: currentPath,
                         url: rootDirectoryURL!.appendingPathComponent(currentPath),
@@ -307,9 +428,9 @@ class MainViewModel: ObservableObject {
                     // Attach handler just in case
                     let newNode = FileNode(data: dirData, hasLoadedChildren: true)
                     newNode.onExpand = { [weak self] n in self?.handleNodeExpansion(n) }
-                    
+
                     nodeMap[currentPath] = newNode
-                    
+
                     // Attach to parent
                     if let parent = nodeMap[parentPath] {
                         parent.children.append(newNode)
@@ -317,26 +438,26 @@ class MainViewModel: ObservableObject {
                     }
                 }
             }
-            
+
             // Create the file/leaf node
             let fileNode = FileNode(data: file, hasLoadedChildren: !file.isLazy)
             if file.isLazy {
                  fileNode.onExpand = { [weak self] n in self?.handleNodeExpansion(n) }
             }
-            
+
             let parentPath = pathComponents.dropLast().joined(separator: "/")
-            
+
             if let parent = nodeMap[parentPath] {
                 parent.children.append(fileNode)
                 fileNode.parent = parent
             }
         }
-        
+
         // Sort children of all affected nodes
         for (_, node) in nodeMap {
              node.children.sort { $0.data.name < $1.data.name }
         }
-        
+
         return parentNode.children
     }
 
@@ -382,9 +503,11 @@ class MainViewModel: ObservableObject {
     func loadHistoryItem(_ item: HistoryItem) {
         switch item.type {
         case .github:
+            currentTabType = .github
             githubURL = item.path
             fetchGitHubRepository()
         case .local:
+            currentTabType = .local
             loadLocalDirectory(from: item)
         case .zip:
             break
@@ -428,6 +551,8 @@ class MainViewModel: ObservableObject {
     }
 
     func generateOutputText() {
+        generateTask?.cancel()
+
         isLoading = true
         errorMessage = nil
 
@@ -439,17 +564,21 @@ class MainViewModel: ObservableObject {
             return
         }
 
-        Task {
+        let token = githubToken
+        generateTask = Task { @MainActor in
             let result = await formatterService.format(
                 selectedItems: selectedFiles,
                 rootDirectoryURL: rootURL,
-                githubToken: self.githubToken
+                githubToken: token
             )
 
-            await MainActor.run {
-                self.outputText = result
-                self.isLoading = false
+            guard !Task.isCancelled else {
+                isLoading = false
+                return
             }
+
+            outputText = result
+            isLoading = false
         }
     }
 

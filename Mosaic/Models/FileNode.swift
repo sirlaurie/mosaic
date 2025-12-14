@@ -3,7 +3,7 @@
 import Combine
 import Foundation
 
-struct FileData: Identifiable, Hashable {
+nonisolated struct FileData: Identifiable, Hashable, Sendable {
     let id = UUID()
     let name: String
     let url: URL
@@ -36,7 +36,7 @@ class FileNode: Identifiable, ObservableObject, Hashable {
             }
         }
     }
-    
+
     var hasLoadedChildren: Bool
     var onExpand: ((FileNode) -> Void)?
 
@@ -60,7 +60,7 @@ class FileNode: Identifiable, ObservableObject, Hashable {
         self.onExpand = onExpand
         self.children.forEach { $0.parent = self }
     }
-    
+
     /// Toggles selection initiated by user interaction.
     /// This efficiently propagates changes down and triggers a single upward update chain.
     func toggleSelection() {
@@ -68,7 +68,7 @@ class FileNode: Identifiable, ObservableObject, Hashable {
             let shouldSelect = !isSelected && !isIndeterminate
             // 1. Propagate down efficiently (without triggering parent updates)
             propagateSelection(selected: shouldSelect)
-            
+
             // 2. Trigger upward update ONCE from this node's parent
             parent?.updateSelectionFromChildren()
         } else {
@@ -82,12 +82,12 @@ class FileNode: Identifiable, ObservableObject, Hashable {
     func propagateSelection(selected: Bool) {
         isBatchUpdating = true
         defer { isBatchUpdating = false }
-        
+
         if isSelected != selected || isIndeterminate {
             isSelected = selected
             isIndeterminate = false
         }
-        
+
         guard data.isDirectory else { return }
         children.forEach { $0.propagateSelection(selected: selected) }
     }

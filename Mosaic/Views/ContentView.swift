@@ -11,6 +11,7 @@ struct ContentView: View {
     @EnvironmentObject var mainViewModel: MainViewModel
     @EnvironmentObject var historyViewModel: HistoryViewModel
     @State private var showCopySuccess = false
+    @State private var sourceSelection: TabType = .local
 
     var body: some View {
         NavigationSplitView {
@@ -20,8 +21,36 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
-        .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
-            logFileTreeChange(oldValue, newValue)
+        .searchable(text: $mainViewModel.fileSearchQuery, prompt: "Search files")
+        .onAppear {
+            sourceSelection = mainViewModel.currentTabType
+        }
+        .onChange(of: mainViewModel.currentTabType) { _, newValue in
+            // Keep toolbar selection in sync when tab changes via history actions.
+            if sourceSelection != newValue {
+                sourceSelection = newValue
+            }
+        }
+        .onChange(of: sourceSelection) { _, newValue in
+            // Defer publishing to avoid "Publishing changes from within view updates" warnings.
+            DispatchQueue.main.async {
+                mainViewModel.userDidSelectSource(newValue)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                sourcePicker
+            }
+
+            ToolbarItemGroup(placement: .primaryAction) {
+                copyToolbarButton
+                exportToolbarButton
+                clearToolbarButton
+                SettingsLink {
+                    Image(systemName: "gearshape")
+                }
+                .help("Settings")
+            }
         }
         .fileExporter(
             isPresented: $mainViewModel.isShowingFileExporter,
@@ -40,14 +69,6 @@ struct ContentView: View {
 
     private var sidebarContent: some View {
         VStack(spacing: 0) {
-            CustomTabView()
-                .frame(height: 56, alignment: .top)
-                .frame(maxWidth: .infinity, alignment: .top)
-                .fixedSize(horizontal: false, vertical: true)
-                .onAppear {
-                    print("🏷️  CustomTabView appeared")
-                }
-
             inputOrTreeView
 
             historyOrEmptyView
@@ -56,9 +77,6 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .fixedSize(horizontal: false, vertical: false)
         .navigationSplitViewColumnWidth(min: 240, ideal: 280)
-        .onAppear {
-            print("📦 Sidebar VStack appeared")
-        }
     }
 
     @ViewBuilder
@@ -68,25 +86,9 @@ struct ContentView: View {
                 .frame(height: 80, alignment: .top)
                 .frame(maxWidth: .infinity, alignment: .top)
                 .fixedSize(horizontal: false, vertical: true)
-                .onAppear {
-                    let timestamp = Date().timeIntervalSince1970
-                    print("✅ [\(timestamp)] CustomInputView appeared")
-                }
-                .onDisappear {
-                    let timestamp = Date().timeIntervalSince1970
-                    print("❌ [\(timestamp)] CustomInputView disappeared")
-                }
         } else {
             FileTreeContainerView()
                 .frame(maxHeight: .infinity)
-                .onAppear {
-                    let timestamp = Date().timeIntervalSince1970
-                    print("✅ [\(timestamp)] FileTreeContainerView appeared")
-                }
-                .onDisappear {
-                    let timestamp = Date().timeIntervalSince1970
-                    print("❌ [\(timestamp)] FileTreeContainerView disappeared")
-                }
         }
     }
 
@@ -109,77 +111,44 @@ struct ContentView: View {
         }
         .id("detail-content")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            print("📄 Detail VStack appeared")
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                toolbarButtons
-            }
-        }
     }
 
-    // MARK: - Toolbar Buttons
+    // MARK: - Toolbar Content
 
-    private var toolbarButtons: some View {
-        HStack(spacing: 6) {
-            copyButton
-            Spacer()
-            saveButton
+    private var sourcePicker: some View {
+        Picker("Source", selection: $sourceSelection) {
+            Text("Local").tag(TabType.local)
+            Text("GitHub").tag(TabType.github)
         }
-        .padding(.leading, 12)
-        .padding(.trailing, 12)
-        .opacity(mainViewModel.fileTree.isEmpty ? 0 : 1)
-        .animation(nil, value: mainViewModel.fileTree.isEmpty)
-        .disabled(mainViewModel.fileTree.isEmpty)
-        .onChange(of: mainViewModel.fileTree.isEmpty) { oldValue, newValue in
-            let timestamp = Date().timeIntervalSince1970
-            print("🎯 [\(timestamp)] Toolbar: fileTree.isEmpty changed from \(oldValue) to \(newValue)")
-        }
+        .pickerStyle(.segmented)
+        .frame(width: 200)
     }
 
-    private var copyButton: some View {
+    private var copyToolbarButton: some View {
         Button(action: handleCopyAction) {
             Image(systemName: showCopySuccess ? "checkmark" : "doc.on.doc")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(showCopySuccess ? .green : .primary)
         }
-        .buttonStyle(.plain)
-        .frame(width: 28, height: 28)
-        .background(copyButtonBackground)
+        .help("Copy output")
+        .keyboardShortcut("c", modifiers: [.command, .shift])
+        .disabled(mainViewModel.outputText.isEmpty)
     }
 
-    private var copyButtonBackground: some View {
-        RoundedRectangle(cornerRadius: 14)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(
-                        showCopySuccess ? Color.green.opacity(0.3) : Color.black.opacity(0.08),
-                        lineWidth: 0.5
-                    )
-            )
-    }
-
-    private var saveButton: some View {
-        Button(action: {
-            mainViewModel.isShowingFileExporter = true
-        }) {
-            Image(systemName: "arrow.down.circle")
-                .font(.system(size: 15, weight: .medium))
+    private var exportToolbarButton: some View {
+        Button(action: { mainViewModel.isShowingFileExporter = true }) {
+            Image(systemName: "square.and.arrow.down")
         }
-        .buttonStyle(.plain)
-        .frame(width: 28, height: 28)
-        .background(saveButtonBackground)
+        .help("Export as text…")
+        .keyboardShortcut("s", modifiers: [.command])
+        .disabled(mainViewModel.outputText.isEmpty)
     }
 
-    private var saveButtonBackground: some View {
-        RoundedRectangle(cornerRadius: 14)
-            .fill(.ultraThinMaterial)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(.black.opacity(0.08), lineWidth: 0.5)
-            )
+    private var clearToolbarButton: some View {
+        Button(role: .destructive, action: { mainViewModel.clearWorkspace() }) {
+            Image(systemName: "trash")
+        }
+        .help("Clear selection and output")
+        .keyboardShortcut("k", modifiers: [.command])
+        .disabled(mainViewModel.fileTree.isEmpty && mainViewModel.outputText.isEmpty)
     }
 
     // MARK: - Helper Methods
@@ -194,12 +163,6 @@ struct ContentView: View {
                 showCopySuccess = false
             }
         }
-    }
-
-    private func logFileTreeChange(_ oldValue: Bool, _ newValue: Bool) {
-        let timestamp = Date().timeIntervalSince1970
-        print("📱 [\(timestamp)] ContentView: fileTree.isEmpty changed from \(oldValue) to \(newValue)")
-        print("📊 [\(timestamp)] ContentView: fileTree.count = \(mainViewModel.fileTree.count)")
     }
 
     private func handleExportResult(_ result: Result<URL, Error>) {

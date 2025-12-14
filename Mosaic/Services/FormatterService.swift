@@ -1,6 +1,6 @@
 import Foundation
 
-class FormatterService {
+nonisolated final class FormatterService: @unchecked Sendable {
     private let localFileService: LocalFileService
     private let gitHubAPIService: GitHubAPIService
 
@@ -9,9 +9,8 @@ class FormatterService {
         self.gitHubAPIService = gitHubAPIService
     }
 
-    func format(selectedItems: [FileData], rootDirectoryURL: URL, githubToken: String?) async
-        -> String
-    {
+    @concurrent
+    func format(selectedItems: [FileData], rootDirectoryURL: URL, githubToken: String?) async -> String {
         guard !selectedItems.isEmpty else {
             return "Directory Structure:\n\n(No items selected)"
         }
@@ -188,7 +187,7 @@ class FormatterService {
     }
 }
 
-private class DirectoryNode {
+private nonisolated final class DirectoryNode {
     let name: String
     var isDirectory: Bool
     var children: [String: DirectoryNode] = [:]
